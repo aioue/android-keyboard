@@ -82,9 +82,10 @@ object DiagHooks {
                 put("isUrl", attrs.mIsUriField)
                 put("noAutoCorrect", attrs.mInputTypeNoAutoCorrect)
                 put("restarting", restarting)
-                // Always false here: record() drops events while suppressed, so a suppressed
-                // field is visible only in DiagStats.suppressedFields.
-                put("suppressed", false)
+                // record() drops events of suppressed fields (password etc.), so they cannot be
+                // logged themselves; this running count (since process start / last clear) makes
+                // them visible: diff it between editor events. Content is never logged.
+                put("suppressedFields", DiagLog.stats().suppressedFields)
             })
         } catch (e: Throwable) {
             // Fail closed if the flag computation itself broke.
@@ -126,6 +127,7 @@ object DiagHooks {
                     put("binaryDictWeight",
                         app.getSettingBlocking(BinaryDictTransformerWeightSetting).toDouble())
                 })
+                o.put("suppressedFields", DiagLog.stats().suppressedFields)
                 DiagSwipeHooks.sessionFields(app, o) // swipe decoder settings, keyboard geometry
                 // "lang:modelName" entries; file names only.
                 o.put("models", JSONArray(app.getSettingBlocking(MODEL_OPTION_KEY).toList()))
@@ -190,6 +192,9 @@ object DiagHooks {
     class UpdateCtx(val gen: Int) {
         @Volatile var lmOutcome = "skipped"
         @Volatile var lmWaitMs = 0L
+        // Time of the synchronous dictionary pass that runs while the LM works in parallel:
+        // lmWaitMs only counts the wait AFTER it, so 0 means the LM finished first.
+        @Volatile var dictMs = -1L
         @Volatile var lmSkipReason: String? = null
         @Volatile var mergeLm: String? = null
         @Volatile var mergeDict: String? = null
@@ -226,9 +231,10 @@ object DiagHooks {
      * empty means the LM returned nothing (model missing, locale mismatch, error), else ok.
      */
     @JvmStatic
-    fun lmDone(seq: Int, result: List<*>?, waitMs: Long) {
+    fun lmDone(seq: Int, result: List<*>?, waitMs: Long, dictMs: Long) {
         val c = ctxFor(seq) ?: return
         c.lmWaitMs = waitMs
+        c.dictMs = dictMs
         c.lmOutcome = when {
             result == null -> "timeout"
             result.isEmpty() -> "empty"
@@ -325,6 +331,10 @@ object DiagHooks {
             o.put("willAutoCorrect", words.mWillAutoCorrect)
             o.put("lm", c.lmOutcome)
             o.put("lmWaitMs", c.lmWaitMs)
+            if (c.dictMs >= 0) {
+                o.put("dictMs", c.dictMs)
+                o.put("lmReadyBeforeWait", c.lmWaitMs == 0L && c.lmOutcome != "timeout")
+            }
             c.lmSkipReason?.let { o.put("lmSkipReason", it) }
             val notes = synchronized(c.mergeNotes) { ArrayList(c.mergeNotes) }
             o.put("mergeBranch", when {

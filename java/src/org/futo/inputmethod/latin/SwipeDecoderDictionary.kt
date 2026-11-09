@@ -480,7 +480,7 @@ class SwipeDecoderDictionary(val context: Context, val locale: Locale) : Diction
         if (useHighBeam && DiagLog.isEnabled()) {
             DiagSwipeHooks.decoder(
                 results.map { arrayOf<Any>(it.word, it.score, it.lmScore, it.ctcScore) },
-                appliedLayoutInfo, beamWidth, isMultiSwipe, left.size + right.size
+                appliedLayoutInfo, beamWidth, isMultiSwipe, left.size + right.size, topK
             )
         }
 

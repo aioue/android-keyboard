@@ -140,7 +140,10 @@ def main():
         for e in sw:
             raw = e.get("raw") or e.get("rawCandidates") or e.get("candidates")
             fil = e.get("filtered") or e.get("filteredCandidates")
-            if isinstance(raw, list):
+            # rawCount is the true count; "raw" is truncated to the top 10 by the logger.
+            if isinstance(e.get("rawCount"), int):
+                nc.append(e["rawCount"])
+            elif isinstance(raw, list):
                 nc.append(len(raw))
             fw, rw = words_of(fil), words_of(raw)
             if fw and rw:
@@ -149,10 +152,28 @@ def main():
                     rej += 1
         if nc:
             print("  candidate count: " + percentiles(nc))
+            dist = Counter(nc)
+            print("  candidate count distribution: " + ", ".join("%d: %d" % kv for kv in sorted(dist.items())))
+            if len(dist) == 1 and len(nc) >= 3:
+                k = next(iter(dist))
+                tk = [e.get("decoderInfo", {}).get("topK") for e in sw if isinstance(e.get("decoderInfo"), dict)]
+                print("  NOTE: every swipe has exactly %d candidates: the decoder is capped (topK=%s in "
+                      "SwipeDecoderDictionary), so a missing word cannot be ranked lower, it is absent."
+                      % (k, tk[0] if tk and tk[0] is not None else "4 hardcoded"))
         if known:
             print("  top raw word not top after filtering: %s" % pct(rej, known))
         lat = [e["latencyMs"] for e in sw if isinstance(e.get("latencyMs"), (int, float))]
+        head("Swipe latency (finger up to composing text set)")
         print("  latencyMs: " + percentiles(lat))
+        if len(lat) < len(sw):
+            print("  %d of %d swipes have no latency (logged by a build without the fix, or no "
+                  "finger-up seen)" % (len(sw) - len(lat), len(sw)))
+        slow = [x for x in lat if x > 300]
+        if lat:
+            print("  over 300 ms: %s" % pct(len(slow), len(lat)))
+        outc = Counter(e.get("outcome", "?") for e in ev if e.get("type") == "swipeOutcome")
+        if outc:
+            print("  swipe outcomes: " + ", ".join("%s=%d" % kv for kv in outc.most_common()))
         # swipe commits followed by a backspaceWord/revert within 10 s
         bs = 0
         sc = [c for c in commits if c.get("commitType") == "swipe"]
@@ -167,6 +188,11 @@ def main():
         picks_sw = [e for e in ev if e.get("type") == "pick" and e.get("source") == "swipe"]
         if picks_sw:
             print("  swipe strip picks: %d" % len(picks_sw))
+
+    eds = [e for e in ev if e.get("type") == "editor" and isinstance(e.get("suppressedFields"), int)]
+    if eds:
+        head("Suppressed fields (password etc., content never logged)")
+        print("  running count at last editor event: %d" % eds[-1]["suppressedFields"])
 
     head("Most reverted typed -> corrected")
     pairs = Counter((r.get("typed"), r.get("corrected")) for r in reverts)

@@ -495,6 +495,7 @@ class GeneralIME(val helper: IMEHelper) : IMEInterface, WordLearner, SuggestionS
             }
 
             // This runs synchronously
+            val diagDictStart = if (DiagLog.isEnabled()) System.currentTimeMillis() else 0L
             inputLogic.getSuggestedWords(
                 settings.current,
                 helper.keyboardSwitcher.keyboard ?: return,
@@ -506,8 +507,9 @@ class GeneralIME(val helper: IMEHelper) : IMEInterface, WordLearner, SuggestionS
             // Wait for LM to report result
             val diagWaitStart = if (DiagLog.isEnabled()) System.currentTimeMillis() else 0L
             lmResult = lmResultHolder.get(null, 350L)
-            // Diag log: ok / timeout (350 ms budget blown) / empty, and how long we waited.
-            if (DiagLog.isEnabled()) DiagHooks.lmDone(sequenceNumber, lmResult, System.currentTimeMillis() - diagWaitStart)
+            // Diag log: ok / timeout (350 ms budget blown) / empty, how long we waited after the
+            // dictionary pass (0 = LM already done) and how long that pass took.
+            if (DiagLog.isEnabled()) DiagHooks.lmDone(sequenceNumber, lmResult, System.currentTimeMillis() - diagWaitStart, diagWaitStart - diagDictStart)
             if(lmResult == null) languageModelFacilitator.reportTimeout()
         } else {
             inputLogic.getSuggestedWords(

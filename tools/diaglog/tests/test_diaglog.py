@@ -94,3 +94,18 @@ def test_report(keys):
 
 def test_report_empty():
     assert run("report.py", stdin="").returncode == 0
+
+
+def test_report_latency_and_cap():
+    sw = lambda t, lat: {"t": t, "type": "swipe", "decoder": "new", "latencyMs": lat, "rawCount": 4,
+                         "raw": [["a", 1, True]] * 4, "decoderInfo": {"topK": 4}}
+    evs = [sw(1, 80), sw(2, 120), sw(3, 400), sw(4, None),
+           {"t": 5, "type": "swipeOutcome", "outcome": "accepted"},
+           {"t": 6, "type": "editor", "suppressedFields": 3}]
+    r = run("report.py", stdin="\n".join(json.dumps(e) for e in evs))
+    assert r.returncode == 0, r.stderr
+    out = r.stdout
+    assert "Swipe latency" in out and "p50=120" in out and "(n=3)" in out
+    assert "1 of 4 swipes have no latency" in out and "over 300 ms: 33.3% (1/3)" in out
+    assert "distribution: 4: 4" in out and "NOTE: every swipe has exactly 4" in out
+    assert "accepted=1" in out and "running count at last editor event: 3" in out

@@ -10,6 +10,7 @@ import org.futo.inputmethod.latin.DisplayTop4Setting
 import org.futo.inputmethod.latin.LegacySwipeSetting
 import org.futo.inputmethod.latin.SuggestedWords
 import org.futo.inputmethod.latin.SuggestedWords.SuggestedWordInfo
+import org.futo.inputmethod.latin.SwipeDecoderDictionary
 import org.futo.inputmethod.latin.SwipeLanguageModelSetting
 import org.futo.inputmethod.latin.SwipeSpecialDecoderSetting
 import org.futo.inputmethod.latin.WordComposer
@@ -27,9 +28,9 @@ import org.json.JSONObject
  * exceptions because a diagnostic must never break swiping. Content (words, coordinates) goes
  * only into DiagLog.record(), never into logcat.
  *
- * Data flow for one gesture (all keyed by the tail-batch sequence number, which is the same
- * value InputLogic.onEndBatchInput hands to the handler, Suggest and GeneralIME):
- *   fingerUp(seq)                      UI thread, finger lifted
+ * Data flow for one gesture (stash keyed by GeneralIME's suggestion sequence number, which is the
+ * value Suggest and tailCompleted see; InputLogic's own auto-commit counter is a different one):
+ *   fingerUp(seq)                      UI thread, finger lifted (single latest timestamp)
  *   begin() / decoder() / raw() / finish(seq, ...)
  *                                      suggestion thread, one synchronous Suggest call, so the
  *                                      decoder's raw output is handed over in a ThreadLocal
@@ -57,6 +58,18 @@ object DiagSwipeHooks {
                 size > MAX_PENDING
         }
 
+    /** Set by LatinIME.onCreate; lets the hooks read the computed keyboard size mode. */
+    @Volatile @JvmStatic var latinIme: java.lang.ref.WeakReference<org.futo.inputmethod.latin.LatinIME>? = null
+
+    /** Computed size class, e.g. RegularKeyboardSize / OneHandedKeyboardSize:left (no geometry). */
+    private fun sizeKind(): String? = try {
+        when (val sz = latinIme?.get()?.size?.value) {
+            null -> null
+            is org.futo.inputmethod.v2keyboard.OneHandedKeyboardSize -> "OneHanded:" + sz.direction.name
+            else -> sz.javaClass.simpleName.removeSuffix("KeyboardSize")
+        }
+    } catch (e: Throwable) { null }
+
     // ---- session -----------------------------------------------------------------------------
 
     /**
@@ -72,7 +85,18 @@ object DiagSwipeHooks {
                 put("specialDecoder", app.getSettingBlocking(SwipeSpecialDecoderSetting))
                 put("swipeLm", app.getSettingBlocking(SwipeLanguageModelSetting))
                 put("top4", app.getSettingBlocking(DisplayTop4Setting))
+                // SwipeDecoderDictionary: topK = 4 for the final (high-beam) pass, beam width 300.
+                put("decoderTopK", 4)
+                put("decoderBeamWidth", SwipeDecoderDictionary.BeamValues.highBeam)
                 Settings.getInstance().current?.let { put("keyboardHeightScale", it.mKeyboardHeightScale.toDouble()) }
+                try {
+                    // Saved sizing mode (Regular / Split / OneHanded / Floating) and hand side.
+                    latinIme?.get()?.sizingCalculator?.getSavedSettings()?.let {
+                        put("sizeMode", it.currentMode.name)
+                        put("oneHandedDirection", it.oneHandedDirection.name)
+                        put("prefersSplit", it.prefersSplit)
+                    }
+                } catch (ignored: Throwable) {}
                 try {
                     KeyboardSwitcher.getInstance().keyboard?.let {
                         put("split", it.mId.mIsSplitLayout)
@@ -120,7 +144,7 @@ object DiagSwipeHooks {
     @JvmStatic
     fun decoder(
         results: List<Array<Any>>, layout: LayoutInfoForModel, beamWidth: Int,
-        multiSwipe: Boolean, segments: Int
+        multiSwipe: Boolean, segments: Int, topK: Int
     ) {
         try {
             val p = pass.get() ?: return
@@ -144,6 +168,9 @@ object DiagSwipeHooks {
                 put("sx", num(layout.sx)); put("sy", num(layout.sy))
                 put("ox", num(layout.ox)); put("oy", num(layout.oy))
                 put("beamWidth", beamWidth)
+                // Hardcoded 4 in SwipeDecoderDictionary (useHighBeam ? 4 : 1): the decoder never
+                // returns more results than this, whatever the beam width.
+                put("topK", topK)
                 put("multiSwipe", multiSwipe)
                 put("segments", segments)
             }
@@ -209,6 +236,7 @@ object DiagSwipeHooks {
                 put("elementId", keyboard.mId.mElementId)
                 put("locale", keyboard.mId.mLocale.toString())
                 put("split", keyboard.mId.mIsSplitLayout)
+                sizeKind()?.let { put("sizeMode", it) }
                 put("width", keyboard.mBaseWidth); put("height", keyboard.mBaseHeight)
                 put("occupiedWidth", keyboard.mOccupiedWidth)
                 put("occupiedHeight", keyboard.mOccupiedHeight)
@@ -256,12 +284,18 @@ object DiagSwipeHooks {
 
     // ---- gesture end (UI thread) -------------------------------------------------------------
 
-    private val fingerUpAt = boundedMap<Long>()
+    // Latest finger-up time (uptime ms, 0 = none). Deliberately NOT keyed by sequence number:
+    // InputLogic.onEndBatchInput passes its own mAutoCommitSequenceNumber, while the tail pass
+    // reaches tailCompleted with GeneralIME's sequenceId (a different counter), so a map keyed by
+    // seq never matched and every latencyMs was null. A gesture ends on the UI thread, its tail
+    // pass completes well within FINGER_UP_MAX_MS, and the next gesture overwrites this value.
+    private var fingerUpAt = 0L
+    private const val FINGER_UP_MAX_MS = 10_000L
 
-    /** InputLogic.onEndBatchInput, before the sequence number is bumped. */
+    /** InputLogic.onEndBatchInput (UI thread). [seq] is only informational, see above. */
     @JvmStatic
-    fun fingerUp(seq: Int) {
-        synchronized(lock) { fingerUpAt[seq] = SystemClock.uptimeMillis() }
+    fun fingerUp(@Suppress("UNUSED_PARAMETER") seq: Int) {
+        synchronized(lock) { fingerUpAt = SystemClock.uptimeMillis() }
     }
 
     private class Pending(
@@ -282,7 +316,11 @@ object DiagSwipeHooks {
     fun tailCompleted(seq: Int, shown: SuggestedWords, distinct: Boolean) {
         try {
             val now = SystemClock.uptimeMillis()
-            val (st, up) = synchronized(lock) { Pair(stashes.remove(seq), fingerUpAt.remove(seq)) }
+            val (st, up) = synchronized(lock) {
+                val u = fingerUpAt.takeIf { it != 0L && now - it in 0..FINGER_UP_MAX_MS }
+                fingerUpAt = 0L
+                Pair(stashes.remove(seq), u)
+            }
             val o = st?.json ?: JSONObject().apply {
                 // No Suggest pass recorded (cancelled, stale, or logging turned on mid-gesture).
                 put("seq", seq); put("decoder", "unknown")
@@ -317,7 +355,7 @@ object DiagSwipeHooks {
     @JvmStatic
     fun reset() {
         synchronized(lock) {
-            stashes.clear(); fingerUpAt.clear()
+            stashes.clear(); fingerUpAt = 0L
             pending = null
             rejectedWord = null; rejectedAt = 0L
         }
