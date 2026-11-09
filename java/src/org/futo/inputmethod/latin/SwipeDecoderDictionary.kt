@@ -13,6 +13,8 @@ import org.futo.inputmethod.keyboard.Keyboard
 import org.futo.inputmethod.keyboard.internal.isAlphabet
 import org.futo.inputmethod.latin.common.ComposedData
 import org.futo.inputmethod.latin.common.InputPointers
+import org.futo.inputmethod.latin.diag.DiagLog
+import org.futo.inputmethod.latin.diag.DiagSwipeHooks
 import org.futo.inputmethod.latin.settings.Settings
 import org.futo.inputmethod.latin.settings.SettingsValues
 import org.futo.inputmethod.latin.settings.SettingsValuesForSuggestion
@@ -410,6 +412,7 @@ class SwipeDecoderDictionary(val context: Context, val locale: Locale) : Diction
 
         val kb = prevKeyboard ?: run {
             Log.e("SwipeDecoderDictionary", "Could not determine keyboard!")
+            if (DiagLog.isEnabled()) DiagSwipeHooks.fellThrough("noKeyboard") // Diag log
             return null
         }
 
@@ -462,6 +465,7 @@ class SwipeDecoderDictionary(val context: Context, val locale: Locale) : Diction
         val results = synchronized(BinaryDictionary.sTrieUsageLock) {
             if(appliedTries?.isEmpty() != false) {
                 Log.e("SwipeDecoderDictionary", "Applied tries are blank! $appliedTries")
+                if (DiagLog.isEnabled()) DiagSwipeHooks.fellThrough("noTries") // Diag log
                 return null
             }
             decoder.recognize(
@@ -469,6 +473,14 @@ class SwipeDecoderDictionary(val context: Context, val locale: Locale) : Diction
                  topK = topK,
                  beamWidth = beamWidth,
                  trieWeights = trieWeights
+            )
+        }
+
+        // Diag log: keep the raw decoder scores (lost once converted to SuggestedWordInfo.mScore).
+        if (useHighBeam && DiagLog.isEnabled()) {
+            DiagSwipeHooks.decoder(
+                results.map { arrayOf<Any>(it.word, it.score, it.lmScore, it.ctcScore) },
+                appliedLayoutInfo, beamWidth, isMultiSwipe, left.size + right.size
             )
         }
 

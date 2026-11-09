@@ -186,6 +186,15 @@ android {
 
     compileSdk 35
 
+    testOptions {
+        unitTests.all {
+            // Lets DiagCryptoTest write the fixture that tools/diaglog/crosscheck.sh decrypts.
+            // Gradle forks the test JVM, so -D on the command line does not reach it otherwise.
+            def fixtureDir = System.getProperty('diaglog.fixtureDir')
+            if (fixtureDir != null) systemProperty 'diaglog.fixtureDir', fixtureDir
+        }
+    }
+
     // Required if using classes in android.test.runner
     useLibrary 'android.test.runner'
 
@@ -354,6 +363,11 @@ android {
             java.srcDirs = ['common/src', 'java/src', 'java/stable/java']
             manifest.srcFile 'java/stable/AndroidManifest.xml'
             res.srcDirs = ['java/unstable/res', translationsWithoutEngValues('translations/devbuild')]
+        }
+
+        // JVM unit tests (DiagCrypto); the repo had no src/test.
+        test {
+            java.srcDirs = ['tests/unit']
         }
 
         androidTest {

@@ -122,6 +122,11 @@ import org.futo.inputmethod.latin.common.Constants
 import org.futo.inputmethod.latin.suggestions.SuggestionStripViewListener
 import org.futo.inputmethod.latin.uix.actions.FavoriteActions
 import org.futo.inputmethod.latin.uix.actions.MoreActionsAction
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import org.futo.inputmethod.latin.uix.actions.DiagToggleAction
+import org.futo.inputmethod.latin.uix.actions.migrateDiagTogglePin
+import org.futo.inputmethod.latin.diag.DIAG_LOG_ENABLED
 import org.futo.inputmethod.latin.uix.actions.PinnedActions
 import org.futo.inputmethod.latin.uix.actions.toActionList
 import org.futo.inputmethod.latin.uix.settings.useDataStore
@@ -566,9 +571,9 @@ fun LazyItemScope.ActionItem(idx: Int, action: Action, onSelect: (Action) -> Uni
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ActionItemSmall(action: Action, onSelect: (Action) -> Unit, onLongSelect: (Action) -> Unit) {
+fun ActionItemSmall(action: Action, onSelect: (Action) -> Unit, onLongSelect: (Action) -> Unit, tintOverride: Color? = null) {
     val bgCol = LocalKeyboardScheme.current.keyboardContainer
-    val fgCol = LocalKeyboardScheme.current.onKeyboardContainer
+    val fgCol = tintOverride ?: LocalKeyboardScheme.current.onKeyboardContainer
 
     val circleRadius = with(LocalDensity.current) {
         16.dp.toPx()
@@ -792,8 +797,20 @@ fun RowScope.PinnedActionItems(onSelect: (Action) -> Unit, onLongSelect: (Action
         actions.toActionList()
     }
 
+    // Existing installs: add diag_toggle after voice input once (see migrateDiagTogglePin).
+    if(!LocalInspectionMode.current) {
+        val context = LocalContext.current
+        LaunchedEffect(Unit) {
+            withContext(Dispatchers.Default) { context.migrateDiagTogglePin() }
+        }
+    }
+
+    // Reactive so the toggle icon turns red as soon as logging is switched on.
+    val diagOn = if(!LocalInspectionMode.current) useDataStoreValue(DIAG_LOG_ENABLED) else false
+
     actionItems.forEach {
-        ActionItemSmall(it, onSelect, onLongSelect)
+        ActionItemSmall(it, onSelect, onLongSelect,
+            tintOverride = if(it == DiagToggleAction && diagOn) Color.Red else null)
     }
 }
 

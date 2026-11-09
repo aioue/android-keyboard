@@ -36,6 +36,9 @@ import org.futo.inputmethod.keyboard.Keyboard;
 import org.futo.inputmethod.keyboard.KeyboardSwitcher;
 import org.futo.inputmethod.latin.BinaryDictionary;
 import org.futo.inputmethod.latin.DictionaryFacilitator;
+import org.futo.inputmethod.latin.diag.DiagHooks;
+import org.futo.inputmethod.latin.diag.DiagLog;
+import org.futo.inputmethod.latin.diag.DiagSwipeHooks;
 import org.futo.inputmethod.latin.LastComposedWord;
 import org.futo.inputmethod.latin.NgramContext;
 import org.futo.inputmethod.latin.RichInputConnection;
@@ -448,6 +451,10 @@ public final class InputLogic {
                     currentKeyboardScriptId);
         }
 
+        // Diag log: rank of the picked suggestion in the strip (are the good ones ranked high?).
+        if (DiagLog.isEnabled()) {
+            DiagHooks.onPick(suggestedWords, suggestionInfo, mWordComposer.isComposingWord());
+        }
         final Event event = Event.createSuggestionPickedEvent(suggestionInfo);
         final InputTransaction inputTransaction = new InputTransaction(settingsValues,
                 event, SystemClock.uptimeMillis(), mSpaceState, keyboardShiftState);
@@ -816,6 +823,8 @@ public final class InputLogic {
     }
 
     public void onEndBatchInput(final InputPointers batchPointers) {
+        // Diag log: finger-up time for the swipe latency, keyed by the sequence number below.
+        if (DiagLog.isEnabled()) DiagSwipeHooks.fingerUp(mAutoCommitSequenceNumber);
         mInputLogicHandler.updateTailBatchInput(batchPointers, mAutoCommitSequenceNumber);
         ++mAutoCommitSequenceNumber;
     }
@@ -1452,6 +1461,7 @@ public final class InputLogic {
                 final String rejectedSuggestion = mWordComposer.getTypedWord();
                 mWordComposer.reset(true);
                 mWordComposer.setRejectedBatchModeSuggestion(rejectedSuggestion);
+                if (DiagLog.isEnabled()) DiagSwipeHooks.onRejected(rejectedSuggestion); // Diag log
                 if (!TextUtils.isEmpty(rejectedSuggestion)) {
                     unlearnWord(rejectedSuggestion, inputTransaction.mSettingsValues,
                             Constants.EVENT_REJECTION);
@@ -1465,6 +1475,10 @@ public final class InputLogic {
                             Constants.EVENT_BACKSPACE);
                 }
             } else {
+                // Diag log: detects a just-committed word backspaced away entirely (backspaceWord).
+                if (DiagLog.isEnabled()) {
+                    DiagHooks.onBackspaceComposing(mWordComposer.getTypedWord(), mWordComposer.isResumed());
+                }
                 mWordComposer.applyProcessedEvent(event);
                 StatsUtils.onBackspacePressed(1);
             }
@@ -1478,6 +1492,10 @@ public final class InputLogic {
             if (mLastComposedWord.canRevertCommit()
                     && inputTransaction.mSettingsValues.mBackspaceUndoesAutocorrect) {
                 final String lastComposedWord = mLastComposedWord.mTypedWord;
+                // Diag log: capture before revertCommit() resets mLastComposedWord.
+                if (DiagLog.isEnabled()) {
+                    DiagHooks.onRevert(lastComposedWord, mLastComposedWord.mCommittedWord, "autocorrect");
+                }
                 revertCommit(inputTransaction, inputTransaction.mSettingsValues);
                 StatsUtils.onRevertAutoCorrect(mImeHelper.getContext(), lastComposedWord);
                 StatsUtils.onWordCommitUserTyped(lastComposedWord, mWordComposer.isBatchMode());
@@ -2816,8 +2834,16 @@ public final class InputLogic {
         // what user typed. Note: currently this is done much later in
         // LastComposedWord#didCommitTypedWord by string equality of the remembered
         // strings.
+        // Diag log: batch mode is reset by commitWord(), so read it first.
+        final boolean diagWasBatch = mWordComposer.isBatchMode();
         mLastComposedWord = mWordComposer.commitWord(commitType,
                 chosenWordWithSuggestions, separatorString, ngramContext);
+        // Diag log: one event per committed word (typed / autocorrect / manualPick / swipe).
+        if (DiagLog.isEnabled()) {
+            DiagHooks.onCommit(mLastComposedWord.mTypedWord, chosenWord, commitType, diagWasBatch,
+                    ngramContext);
+            DiagSwipeHooks.onCommit(chosenWord, commitType, diagWasBatch);
+        }
         if (DebugFlags.DEBUG_ENABLED) {
             long runTimeMillis = System.currentTimeMillis() - startTimeMillis;
             Log.d(TAG, "commitChosenWord() : " + runTimeMillis + " ms to run "

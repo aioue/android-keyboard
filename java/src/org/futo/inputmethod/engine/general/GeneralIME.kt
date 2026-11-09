@@ -39,6 +39,9 @@ import org.futo.inputmethod.latin.SuggestionBlacklist
 import org.futo.inputmethod.latin.WordComposer
 import org.futo.inputmethod.latin.common.Constants
 import org.futo.inputmethod.latin.common.InputPointers
+import org.futo.inputmethod.latin.diag.DiagHooks
+import org.futo.inputmethod.latin.diag.DiagLog
+import org.futo.inputmethod.latin.diag.DiagSwipeHooks
 import org.futo.inputmethod.latin.inputlogic.InputLogic
 import org.futo.inputmethod.latin.settings.Settings
 import org.futo.inputmethod.latin.suggestions.SuggestionStripViewAccessor
@@ -438,6 +441,15 @@ class GeneralIME(val helper: IMEHelper) : IMEInterface, WordLearner, SuggestionS
         }
 
         showSuggestionStrip(words)
+        // Diag log: the autocorrect decision for the word being composed (typing only).
+        if (DiagLog.isEnabled() && inputStyle == SuggestedWords.INPUT_STYLE_TYPING) {
+            DiagHooks.suggest(
+                sequenceNumber, words, inputStyle, inputLogic.mWordComposer.isComposingWord,
+                settings.current.mAutoCorrectionThreshold,
+                languageModelFacilitator.isTransformerDisabled(),
+                languageModelFacilitator.diagTimeouts()
+            )
+        }
         when(inputStyle) {
             SuggestedWords.INPUT_STYLE_TAIL_BATCH -> {
                 val updateBatch = {
@@ -447,6 +459,8 @@ class GeneralIME(val helper: IMEHelper) : IMEInterface, WordLearner, SuggestionS
                         helper.keyboardSwitcher,
                         swipeDistinct
                     )
+                    // Diag log: emits the `swipe` event (latency = finger up to composing text set).
+                    if (DiagLog.isEnabled()) DiagSwipeHooks.tailCompleted(sequenceNumber, words, swipeDistinct)
 
                     if(settings.current.mVibrateOn) {
                         helper.keyboardSwitcher.mainKeyboardView?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY_RELEASE)
@@ -464,6 +478,8 @@ class GeneralIME(val helper: IMEHelper) : IMEInterface, WordLearner, SuggestionS
     var updateSuggestionJob: Job? = null
     var lmUpdateJob: Job? = null
     private suspend fun updateSuggestionsDictionaryInternal(inputStyle: Int, sequenceNumber: Int) {
+        // Diag log: reset the per-update LM context that DiagHooks.suggest() reports.
+        if (DiagLog.isEnabled()) DiagHooks.suggestBegin(sequenceNumber)
         // This method returns null for us if LM is disabled
         val predictionInputValues = languageModelFacilitator.makePredictionInputValues(inputStyle)
 
@@ -488,7 +504,10 @@ class GeneralIME(val helper: IMEHelper) : IMEInterface, WordLearner, SuggestionS
             ) { suggestedWords -> dictResult = suggestedWords }
 
             // Wait for LM to report result
+            val diagWaitStart = if (DiagLog.isEnabled()) System.currentTimeMillis() else 0L
             lmResult = lmResultHolder.get(null, 350L)
+            // Diag log: ok / timeout (350 ms budget blown) / empty, and how long we waited.
+            if (DiagLog.isEnabled()) DiagHooks.lmDone(sequenceNumber, lmResult, System.currentTimeMillis() - diagWaitStart)
             if(lmResult == null) languageModelFacilitator.reportTimeout()
         } else {
             inputLogic.getSuggestedWords(

@@ -25,6 +25,8 @@ import org.futo.inputmethod.latin.SuggestedWords
 import org.futo.inputmethod.latin.SuggestedWords.SuggestedWordInfo
 import org.futo.inputmethod.latin.SuggestionBlacklist
 import org.futo.inputmethod.latin.common.ComposedData
+import org.futo.inputmethod.latin.diag.DiagHooks
+import org.futo.inputmethod.latin.diag.DiagLog
 import org.futo.inputmethod.latin.inputlogic.InputLogic
 import org.futo.inputmethod.latin.settings.Settings
 import org.futo.inputmethod.latin.uix.SettingsKey
@@ -144,7 +146,10 @@ public class LanguageModelFacilitator(
         val composedData: ComposedData,
         val ngramContext: NgramContext,
         val inputStyle: Int,
-        val sequenceId: Int
+        val sequenceId: Int,
+        // Diag log: the update's context, captured when the values are made so the LM coroutine
+        // reports into its own update even if a newer one has begun.
+        val diag: DiagHooks.UpdateCtx? = if (DiagLog.isEnabled()) DiagHooks.current() else null
     )
     private val sharedFlow = MutableSharedFlow<PredictionInputValues>(replay = 0, extraBufferCapacity = 1)
 
@@ -166,6 +171,8 @@ public class LanguageModelFacilitator(
             transformerDisabled = true
             if(BuildConfig.DEBUG) Log.w(TAG, "Temporarily disabling transformer due to continuous timeouts")
         }
+        // Diag log: timeouts silently degrade to dictionary-only until the next onStartInput.
+        if (DiagLog.isEnabled()) DiagHooks.lmState(numConsecutiveTimeouts, transformerDisabled, "timeout")
     }
 
     private var skipLanguage: String? = null
@@ -187,11 +194,15 @@ public class LanguageModelFacilitator(
             } else {
                 if(BuildConfig.DEBUG) Log.d(TAG, "no model for ${locale.language}")
                 skipLanguage = locale.language
+                if (DiagLog.isEnabled()) DiagHooks.lmSkip("noModelForLocale", values.diag)
                 return null
             }
         }
 
-        if(dictionaryFacilitator.mostConfidentLocale != languageModel?.locale) return null
+        if(dictionaryFacilitator.mostConfidentLocale != languageModel?.locale) {
+            if (DiagLog.isEnabled()) DiagHooks.lmSkip("localeMismatch", values.diag)
+            return null
+        }
 
         val keyboard = keyboardSwitcher.keyboard ?: return null
 
@@ -300,6 +311,7 @@ public class LanguageModelFacilitator(
             suggestionResults.add(clone)
             filtered.add(maxWordDict)
             filtered.add(maxWord)
+            if (DiagLog.isEnabled()) DiagHooks.mergeNote("bothAgree", values.diag)
         }
         // In some cases the LM will predict an uppercased word but dictionary predicts lowercased,
         // we should prefer the lowercase version to reduce automatically capitalizing which can be
@@ -311,6 +323,7 @@ public class LanguageModelFacilitator(
             autocorrectWord = clone
             suggestionResults.add(clone)
             filtered.add(maxWordDict)
+            if (DiagLog.isEnabled()) DiagHooks.mergeNote("bothAgreeLowercased", values.diag)
         }
 
         if(transformerWeight <= 0.0f) {
@@ -340,6 +353,7 @@ public class LanguageModelFacilitator(
                 val clone = maxWordDict.scoreAtLeast(word)
                 suggestionResults.add(clone)
                 spaceReplacementPerformed = true
+                if (DiagLog.isEnabled()) DiagHooks.mergeNote("spaceReplacement", values.diag)
                 continue
             }
 
@@ -354,7 +368,10 @@ public class LanguageModelFacilitator(
             if(BuildConfig.DEBUG) Log.d(TAG, "type user history found")
             val clone = maxWordDict.scoreAtLeast(maxWord)
             suggestionResults.add(clone)
+            if (DiagLog.isEnabled()) DiagHooks.mergeNote("userHistoryForced", values.diag)
         }
+        // Diag log: who the two engines each picked, for judging the 3.4 dictionary weight.
+        if (DiagLog.isEnabled()) DiagHooks.mergeTop(maxWord, maxWordDict, values.diag)
 
         suggestionResults.mRawSuggestions?.addAll(reweightedSuggestions.filter { !filtered.contains(it) })
         if(transformerWeight != Float.POSITIVE_INFINITY) {
@@ -451,7 +468,15 @@ public class LanguageModelFacilitator(
     var prevAcceptedLayout: Keyboard? = null
     var prevAcceptedLayoutResult = false
     fun makePredictionInputValues(inputStyle: Int): PredictionInputValues? {
-        if(shouldPassThroughToLegacy()) return null
+        // Diag log: each early return below records why the transformer was skipped.
+        if(shouldPassThroughToLegacy()) {
+            if (DiagLog.isEnabled()) DiagHooks.lmSkip(when {
+                !settings.current.mTransformerPredictionEnabled -> "transformerOff"
+                dictionaryFacilitator.primaryLocale.language == skipLanguage -> "noModelForLocale"
+                else -> "disabledByTimeouts"
+            })
+            return null
+        }
 
         if(inputStyle == SuggestedWords.INPUT_STYLE_TAIL_BATCH
             || inputStyle == SuggestedWords.INPUT_STYLE_UPDATE_BATCH) return null
@@ -461,7 +486,10 @@ public class LanguageModelFacilitator(
             return null
         }
 
-        if(settingsValues.mInputAttributes.mIsEmailField) return null
+        if(settingsValues.mInputAttributes.mIsEmailField) {
+            if (DiagLog.isEnabled()) DiagHooks.lmSkip("emailField")
+            return null
+        }
 
         if(!inputLogic.mConnection.isConnected) return null
 
@@ -490,8 +518,10 @@ public class LanguageModelFacilitator(
                     }
                 }
 
-                if(prevAcceptedLayoutResult == false)
+                if(prevAcceptedLayoutResult == false) {
+                    if (DiagLog.isEnabled()) DiagHooks.lmSkip("nonQwertyLayout")
                     return null
+                }
             }
 
             val values = PredictionInputValues(
@@ -621,9 +651,16 @@ public class LanguageModelFacilitator(
     }
 
     public fun onStartInput() {
+        // Diag log: record what the reset below wipes (counters are otherwise never visible).
+        if (DiagLog.isEnabled() && (transformerDisabled || numConsecutiveTimeouts > 0)) {
+            DiagHooks.lmState(numConsecutiveTimeouts, transformerDisabled, "resetOnStartInput")
+        }
         transformerDisabled = false
         numConsecutiveTimeouts = 0
     }
 
     public fun isTransformerDisabled(): Boolean = transformerDisabled
+
+    // Diag log: consecutive LM timeouts so far (reset in onStartInput).
+    public fun diagTimeouts(): Int = numConsecutiveTimeouts
 }

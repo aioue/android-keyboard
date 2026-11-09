@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exposes only cacheDir/diag-export/, where DiagLog.exportBundle writes the (still encrypted) zip. -->
+<paths>
+    <cache-path name="diag-export" path="diag-export/" />
+</paths>

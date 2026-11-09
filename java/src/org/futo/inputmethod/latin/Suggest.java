@@ -27,6 +27,8 @@ import org.futo.inputmethod.latin.SuggestedWords.SuggestedWordInfo;
 import org.futo.inputmethod.latin.common.Constants;
 import org.futo.inputmethod.latin.common.StringUtils;
 import org.futo.inputmethod.latin.define.DebugFlags;
+import org.futo.inputmethod.latin.diag.DiagLog;
+import org.futo.inputmethod.latin.diag.DiagSwipeHooks;
 import org.futo.inputmethod.latin.settings.SettingsValuesForSuggestion;
 import org.futo.inputmethod.latin.utils.AutoCorrectionUtils;
 import org.futo.inputmethod.latin.utils.BinaryDictionaryUtils;
@@ -350,6 +352,8 @@ public final class Suggest {
             final SettingsValuesForSuggestion settingsValuesForSuggestion,
             final int inputStyle, final int sequenceNumber,
             final OnGetSuggestedWordsCallback callback) {
+        // Diag log: reset the decoder hand-over (see DiagSwipeHooks) before the decoder runs.
+        if (DiagLog.isEnabled()) DiagSwipeHooks.begin();
         final SuggestionResults suggestionResults = mDictionaryFacilitator.getSuggestionResults(
                 wordComposer.getComposedDataSnapshot(), ngramContext, keyboard,
                 settingsValuesForSuggestion, SESSION_ID_GESTURE, inputStyle);
@@ -358,6 +362,8 @@ public final class Suggest {
         final ArrayList<SuggestedWordInfo> suggestionsContainer =
                 new ArrayList<>(suggestionResults);
         final int suggestionsCount = suggestionsContainer.size();
+        // Diag log: candidates as the decoder/dictionaries produced them, before any filtering.
+        if (DiagLog.isEnabled()) DiagSwipeHooks.raw(suggestionsContainer, SUPPRESS_SUGGEST_THRESHOLD);
         final boolean isFirstCharCapitalized = wordComposer.wasShiftedNoLock();
         final boolean isAllUpperCase = wordComposer.isAllUpperCase();
         if (isFirstCharCapitalized || isAllUpperCase) {
@@ -378,6 +384,7 @@ public final class Suggest {
             final SuggestedWordInfo rejected = suggestionsContainer.remove(0);
             Log.i(TAG, "Swipe: Swapping top candidate [ " + rejected.mWord + " ] as it was previously rejected by user");
             suggestionsContainer.add(1, rejected);
+            if (DiagLog.isEnabled()) DiagSwipeHooks.demoted(rejected.mWord); // Diag log
         }
         SuggestedWordInfo.removeDups(null /* typedWord */, suggestionsContainer);
 
@@ -396,6 +403,11 @@ public final class Suggest {
         final SuggestedWordInfo pseudoTypedWordInfo = suggestionsContainer.isEmpty() ? null
                 : suggestionsContainer.get(0);
 
+        // Diag log: assembles the `swipe` event; no-op for non-tail passes.
+        if (DiagLog.isEnabled()) {
+            DiagSwipeHooks.finish(sequenceNumber, inputStyle, wordComposer, keyboard,
+                    suggestionsContainer, SUPPRESS_SUGGEST_THRESHOLD);
+        }
         callback.onGetSuggestedWords(new SuggestedWords(suggestionsContainer,
                 suggestionResults.mRawSuggestions,
                 pseudoTypedWordInfo,

@@ -218,6 +218,17 @@
             android:name=".uix.actions.clipboard.ClipboardProvider"
             android:exported="false"
             android:grantUriPermissions="true" />
+        <!-- Private-fork DiagLog export: shares only cacheDir/diag-export/ (encrypted zip) through the
+             share sheet. Not exported; access is by per-URI grant on the share intent. -->
+        <provider
+            android:authorities="${applicationId}.diagexport"
+            android:name="androidx.core.content.FileProvider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/diag_export_paths" />
+        </provider>
     </application>
 
     <!-- To query enabled input methods for voice IME detection -->

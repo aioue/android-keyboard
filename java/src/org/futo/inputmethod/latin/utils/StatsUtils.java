@@ -22,6 +22,8 @@ import android.view.inputmethod.InputMethodSubtype;
 
 import org.futo.inputmethod.latin.DictionaryFacilitator;
 import org.futo.inputmethod.latin.RichInputMethodManager;
+import org.futo.inputmethod.latin.diag.DiagHooks;
+import org.futo.inputmethod.latin.diag.DiagLog;
 import org.futo.inputmethod.latin.SuggestedWords;
 import org.futo.inputmethod.latin.settings.Settings;
 import org.futo.inputmethod.latin.settings.SettingsValues;
@@ -90,6 +92,8 @@ public final class StatsUtils {
     }
 
     public static void onRevertDoubleSpacePeriod() {
+        // Diag log: backspace undid the automatic ". " (two spaces typed, period inserted).
+        if (DiagLog.isEnabled()) { DiagHooks.onRevert("  ", ". ", "doubleSpace"); }
     }
 
     public static void onRevertSwapPunctuation() {
@@ -120,6 +124,8 @@ public final class StatsUtils {
     }
 
     public static void onDoubleSpacePeriod() {
+        // Diag log: lets revert events report the time since the period was inserted.
+        if (DiagLog.isEnabled()) { DiagHooks.onDoubleSpacePeriod(); }
     }
 
     public static void onLoadSettings(SettingsValues settingsValues) {

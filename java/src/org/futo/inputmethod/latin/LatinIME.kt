@@ -392,6 +392,7 @@ class LatinIME : InputMethodServiceCompose(), LatinIMELegacy.SuggestionStripCont
         LayoutManager.init(this)
 
         DataStoreHelper.init(this)
+        org.futo.inputmethod.latin.diag.DiagLog.init(this)
 
         val filter = IntentFilter(Intent.ACTION_USER_UNLOCKED)
         registerReceiver(unlockReceiver, filter)
@@ -619,7 +620,11 @@ class LatinIME : InputMethodServiceCompose(), LatinIMELegacy.SuggestionStripCont
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
+        // Diag log: stay closed while the legacy startInput runs (it may still commit or reset the
+        // previous field's composing word), then evaluate suppression for the new field.
+        org.futo.inputmethod.latin.diag.DiagLog.onFinishInput()
         latinIMELegacy.onStartInput(attribute, restarting)
+        org.futo.inputmethod.latin.diag.DiagHooks.onStartInput(this, attribute, restarting)
         uixManager.inputStarted(attribute)
         //imeManager.onStartInput() // TODO: Is this call needed or not?
     }
@@ -642,6 +647,8 @@ class LatinIME : InputMethodServiceCompose(), LatinIMELegacy.SuggestionStripCont
     }
 
     override fun onFinishInput() {
+        // Diag log: first, before InputLogic.finishInput can commit/reset the old field's word.
+        org.futo.inputmethod.latin.diag.DiagLog.onFinishInput()
         super.onFinishInput()
         latinIMELegacy.onFinishInput()
         uixManager.onInputFinishing()
@@ -881,6 +888,12 @@ class LatinIME : InputMethodServiceCompose(), LatinIMELegacy.SuggestionStripCont
         this.overrideInputConnection = to
         this.overrideEditorInfo = editorInfo
 
+        // Diag log: typing in an action-window text field (or back in the real field) is a field
+        // change the IME never reports via onStartInput; evaluate suppression with the info in force.
+        org.futo.inputmethod.latin.diag.DiagLog.onFinishInput()
+        org.futo.inputmethod.latin.diag.DiagHooks.onStartInput(
+            this, editorInfo ?: super.getCurrentInputEditorInfo(), false)
+
         latinIMELegacy.loadSettings()
 
         imeManager.onStartInput()
@@ -919,6 +932,8 @@ class LatinIME : InputMethodServiceCompose(), LatinIMELegacy.SuggestionStripCont
 
     private fun onDeviceUnlocked() {
         forceUnlockDatastore(this)
+        // Diag log: init() ran before unlock and left logging off; re-apply the saved setting.
+        org.futo.inputmethod.latin.diag.DiagHooks.onUnlocked(this)
 
         Log.i("LatinIME", "Device has been unlocked, reloading settings")
 
