@@ -49,3 +49,6 @@ session (build, settings snapshot, models, locale, layout), editor (flags only, 
 
 ## Privacy gating
 Events built asynchronously (suggest, swipe) capture a field generation at begin and are dropped at emit time (and again on the writer thread) if the generation changed or the current field is suppressed. Disabling logging also clears the RAM ring and hook state.
+
+## Swipe event additions
+`swipe` and `swipeOutcome` carry `proc` (process-start epoch ms, constant per process). `seq` restarts at each process start, so (proc, seq) is the unique key. `swipe.decoderInfo` also carries LM diagnostics: `hasLm`, `hasDecoder`, `timingUs{resample,encoder,decoder,beam,lm,total}`, `scoring{gamma,lambda,beta,alpha}`, `ctxWordCount` (words handed to decoder.setContext), `ctxWords` (last 3 only), `lmAsset`, `multilingualLocales` (non-zero disables the LM).

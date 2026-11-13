@@ -482,6 +482,7 @@ class SwipeDecoderDictionary(val context: Context, val locale: Locale) : Diction
                 results.map { arrayOf<Any>(it.word, it.score, it.lmScore, it.ctcScore) },
                 appliedLayoutInfo, beamWidth, isMultiSwipe, left.size + right.size, topK
             )
+            DiagSwipeHooks.decoderState(decoder, wordsContext, appliedLayoutInfo.lm)
         }
 
         // basically update it at end of swiping

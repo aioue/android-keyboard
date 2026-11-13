@@ -46,6 +46,11 @@ object DiagSwipeHooks {
 
     private val lock = Any()
 
+    /** Process start epoch ms: `seq` restarts per process and collided across restarts, so
+     *  swipe and swipeOutcome carry this to make (proc, seq) unique. */
+    private val proc: Long =
+        System.currentTimeMillis() - (SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime())
+
     // ---- helpers -----------------------------------------------------------------------------
 
     /** JSONObject.put(double) throws on NaN/Infinity, and decoder scores can be either. */
@@ -177,6 +182,39 @@ object DiagSwipeHooks {
         } catch (ignored: Throwable) {}
     }
 
+    /**
+     * LM diagnostics for the same pass, merged into decoderInfo. Answers whether the context LM
+     * is loaded and fed: hasLm/hasDecoder, per-stage timings (lmUs > 0 means the LM ran), the
+     * scoring weights, how many context words reached the decoder and the last three of them
+     * (content, so only into DiagLog), the LM asset and the multilingual locale count (non-empty
+     * disables the LM path in SpecialContextLM.match).
+     */
+    @JvmStatic
+    fun decoderState(decoder: org.futo.ml.inference.SwipeDecoder, ctx: List<String>, lmAsset: String) {
+        try {
+            val p = pass.get() ?: return
+            val l = p.layout ?: return
+            l.put("hasLm", decoder.hasLm()); l.put("hasDecoder", decoder.hasDecoder())
+            decoder.lastTiming().let {
+                l.put("timingUs", JSONObject().apply {
+                    put("resample", num(it.resampleUs)); put("encoder", num(it.encoderUs))
+                    put("decoder", num(it.decoderUs)); put("beam", num(it.beamUs))
+                    put("lm", num(it.lmUs)); put("total", num(it.totalUs))
+                })
+            }
+            decoder.scoring.let {
+                l.put("scoring", JSONObject().apply {
+                    put("gamma", num(it.gamma)); put("lambda", num(it.lambda))
+                    put("beta", num(it.beta)); put("alpha", num(it.alpha))
+                })
+            }
+            l.put("ctxWordCount", ctx.size)
+            l.put("ctxWords", JSONArray(ctx.takeLast(3)))
+            l.put("lmAsset", lmAsset)
+            l.put("multilingualLocales", Settings.getInstance().current?.mMultilingualLocales?.size ?: -1)
+        } catch (ignored: Throwable) {}
+    }
+
     /** Candidates as they entered Suggest, before dedupe/threshold/demotion. */
     @JvmStatic
     fun raw(candidates: List<SuggestedWordInfo>, suppressThreshold: Int) {
@@ -222,7 +260,7 @@ object DiagSwipeHooks {
             val p = pass.get() ?: return
             pass.remove()
             val o = JSONObject()
-            o.put("seq", seq)
+            o.put("seq", seq); o.put("proc", proc)
             // Decoder: "new" when SwipeDecoderDictionary produced results, else the legacy
             // BinaryDictionary gesture path (setting on, decoder unavailable, or fell through).
             o.put("decoder", if (p.decoder != null) "new" else "legacy")
@@ -323,7 +361,7 @@ object DiagSwipeHooks {
             }
             val o = st?.json ?: JSONObject().apply {
                 // No Suggest pass recorded (cancelled, stale, or logging turned on mid-gesture).
-                put("seq", seq); put("decoder", "unknown")
+                put("seq", seq); put("proc", proc); put("decoder", "unknown")
             }
             val top = if (shown.isEmpty) null else shown.getWord(0)
             o.put("latencyMs", if (up != null) now - up else JSONObject.NULL)
@@ -371,7 +409,7 @@ object DiagSwipeHooks {
 
     private fun outcome(p: Pending, kind: String, now: Long, extra: ((JSONObject) -> Unit)?) {
         DiagLog.record("swipeOutcome", JSONObject().apply {
-            put("seq", p.seq); put("outcome", kind)
+            put("seq", p.seq); put("proc", proc); put("outcome", kind)
             put("word", p.word)
             put("msSinceSwipe", now - p.at)
             extra?.invoke(this)
