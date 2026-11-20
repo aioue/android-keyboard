@@ -1,7 +1,8 @@
 package org.futo.inputmethod.latin.uix.actions
 
 import android.content.Intent
-import android.os.SystemClock
+import kotlinx.coroutines.withTimeoutOrNull
+import org.futo.inputmethod.latin.common.Constants
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -42,6 +43,7 @@ import org.futo.inputmethod.latin.uix.DISALLOW_SYMBOLS
 import org.futo.inputmethod.latin.uix.ENABLE_SOUND
 import org.futo.inputmethod.latin.uix.KeyboardManagerForAction
 import org.futo.inputmethod.latin.uix.PREFER_BLUETOOTH
+import org.futo.inputmethod.latin.uix.PREWARM_RECORDER
 import org.futo.inputmethod.latin.uix.PersistentActionState
 import org.futo.inputmethod.latin.uix.ResourceHelper
 import org.futo.inputmethod.latin.uix.USE_PERSONAL_DICT
@@ -139,6 +141,7 @@ private class VoiceInputActionWindow(
         val useVAD = context.getSetting(USE_VAD_AUTOSTOP)
         val usePersonalDict = context.getSetting(USE_PERSONAL_DICT)
         val animateBubble = context.getSetting(ANIMATE_BUBBLE)
+        val prewarm = context.getSetting(PREWARM_RECORDER)
 
         val primaryModel = model
         val languageSpecificModels = mutableMapOf<Language, ModelLoader>()
@@ -168,7 +171,8 @@ private class VoiceInputActionWindow(
                 preferBluetoothMic = useBluetoothAudio,
                 requestAudioFocus = requestAudioFocus,
                 canExpandSpace = canExpandSpace,
-                useVADAutoStop = useVAD
+                useVADAutoStop = useVAD,
+                usePrewarmedRecorder = prewarm
             )
         )
     }
@@ -222,12 +226,13 @@ private class VoiceInputActionWindow(
     // Personal fork: how long the last touch on the panel lasted. A press longer than HOLD_MS is a
     // hold (it suspends silence auto-stop while down) and must not also count as the tap that
     // finishes the recording when the finger lifts.
-    private var lastPressMs = 0L
+    private var lastPressWasHold = false
     private val HOLD_MS = 350L
 
     @Composable
     override fun WindowContents(keyboardShown: Boolean) {
         androidx.compose.runtime.LaunchedEffect(Unit) { VoiceTiming.mark("voice window first composed") }
+        val view = androidx.compose.ui.platform.LocalView.current
         Box(modifier = Modifier
             .fillMaxSize()
             // Observes touches on the Initial pass without consuming them, so child buttons
@@ -235,19 +240,34 @@ private class VoiceInputActionWindow(
             .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    val start = SystemClock.uptimeMillis()
                     recognizerView.value?.setHeld(true)
-                    do {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                    } while (event.changes.fastAny { it.pressed })
-                    lastPressMs = SystemClock.uptimeMillis() - start
-                    recognizerView.value?.setHeld(false)
+                    val releasedAsTap = withTimeoutOrNull(HOLD_MS) {
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                        } while (event.changes.fastAny { it.pressed })
+                        true
+                    } ?: false
+
+                    if (releasedAsTap) {
+                        lastPressWasHold = false
+                        recognizerView.value?.setHeld(false)
+                    } else {
+                        // Still down after HOLD_MS: this is a hold. Buzz like a keypress so you
+                        // know auto-stop is suspended, then finish as soon as the finger lifts.
+                        lastPressWasHold = true
+                        manager.performHapticAndAudioFeedback(Constants.CODE_TAB, view)
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                        } while (event.changes.fastAny { it.pressed })
+                        recognizerView.value?.setHeld(false)
+                        recognizerView.value?.finish()
+                    }
                 }
             }
             .clickable(
                 enabled = true,
                 onClickLabel = null,
-                onClick = { if (lastPressMs < HOLD_MS) recognizerView.value?.finish() },
+                onClick = { if (!lastPressWasHold) recognizerView.value?.finish() },
                 role = null,
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() })
@@ -268,6 +288,10 @@ private class VoiceInputActionWindow(
         runBlocking { initJob.cancelAndJoin() }
         recognizerView.value?.cancel()
         state.modelManager.cancelAll()
+        // Personal fork: the recorder was consumed by this session; prepare the next one.
+        manager.getLifecycleScope().launch(Dispatchers.Default) {
+            if (context.getSetting(PREWARM_RECORDER)) org.futo.voiceinput.shared.RecorderPrewarm.prewarm(context)
+        }
         return CloseResult.Default
     }
 

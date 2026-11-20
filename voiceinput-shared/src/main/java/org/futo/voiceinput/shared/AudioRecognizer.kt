@@ -81,7 +81,8 @@ data class RecordingSettings(
     val preferBluetoothMic: Boolean,
     val requestAudioFocus: Boolean,
     val canExpandSpace: Boolean,
-    val useVADAutoStop: Boolean
+    val useVADAutoStop: Boolean,
+    val usePrewarmedRecorder: Boolean = false
 )
 
 data class AudioRecognizerSettings(
@@ -282,19 +283,13 @@ class AudioRecognizer(
 
     @Throws(SecurityException::class)
     private fun createAudioRecorder(): AudioRecord {
-        val recorder = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            16000,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            16000 * 2 * 5
-        )
+        // Personal fork: use the pre-created recorder when allowed. Not with a Bluetooth mic, since
+        // the communication device is chosen before the recorder is created in that case.
+        val warm = if (settings.recordingConfiguration.usePrewarmedRecorder &&
+            !settings.recordingConfiguration.preferBluetoothMic) RecorderPrewarm.take() else null
+        val recorder = warm ?: RecorderPrewarm.create()
 
         this.recorder = recorder
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            recorder.setPreferredMicrophoneDirection(MicrophoneDirection.MIC_DIRECTION_TOWARDS_USER)
-        }
 
         return recorder
     }

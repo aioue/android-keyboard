@@ -11,6 +11,7 @@ import org.futo.inputmethod.latin.R
 import org.futo.inputmethod.latin.uix.ANIMATE_BUBBLE
 import org.futo.inputmethod.latin.uix.AUDIO_FOCUS
 import org.futo.inputmethod.latin.uix.CAN_EXPAND_SPACE
+import org.futo.inputmethod.latin.uix.PREWARM_RECORDER
 import org.futo.inputmethod.latin.uix.DISALLOW_SYMBOLS
 import org.futo.inputmethod.latin.uix.ENABLE_SOUND
 import org.futo.inputmethod.latin.uix.PREFER_BLUETOOTH
@@ -158,6 +159,12 @@ val VoiceInputMenu = UserSettingsMenu(
             title = R.string.voice_input_settings_long_form,
             subtitle = R.string.voice_input_settings_long_form_subtitle,
             setting = CAN_EXPAND_SPACE
+        ).copy(visibilityCheck = visibilityCheckNotSystemVoiceInput),
+
+        userSettingToggleDataStore(
+            title = R.string.voice_input_settings_prewarm_recorder,
+            subtitle = R.string.voice_input_settings_prewarm_recorder_subtitle,
+            setting = PREWARM_RECORDER
         ).copy(visibilityCheck = visibilityCheckNotSystemVoiceInput),
 
         userSettingToggleDataStore(

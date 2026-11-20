@@ -44,6 +44,12 @@ val AUDIO_FOCUS = SettingsKey(
     default = true
 )
 
+// Personal fork: keep a constructed (not started) AudioRecord ready while the keyboard is shown.
+val PREWARM_RECORDER = SettingsKey(
+    key = booleanPreferencesKey("prewarm_recorder"),
+    default = true
+)
+
 val USE_VAD_AUTOSTOP = SettingsKey(
     key = booleanPreferencesKey("use_vad_autostop"),
     default = true
