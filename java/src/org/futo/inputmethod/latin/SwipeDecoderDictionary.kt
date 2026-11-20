@@ -332,6 +332,12 @@ class SwipeDecoderDictionary(val context: Context, val locale: Locale) : Diction
     private fun getOrInitDecoder(): SwipeDecoder = decoder ?: run {
         val swipeModelPath = getFilePath(context, SWIPE_MODEL)
 
+        // Personal fork experiment: the native library reports the encoder-only row of scoring.json
+        // (alpha 0, so the context LM never runs), not the decoder + context LM rows. SCORING_ASSET
+        // was declared but never copied next to the models. Copy it so the native side can find it.
+        // If the logged scoring alpha stays 0 after this, the native lookup does not use this file.
+        getFilePath(context, SCORING_ASSET)
+
         val decoder = SwipeDecoder(
             encoderPath = swipeModelPath,
             beamWidth = BeamValues.highestBeam,
