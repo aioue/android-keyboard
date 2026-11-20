@@ -155,6 +155,11 @@ class RecognizerView(
         recognizer.finish()
     }
 
+    // Personal fork: true while the user is holding a finger on the voice panel.
+    fun setHeld(held: Boolean) {
+        recognizer.setHeld(held)
+    }
+
     fun cancel() {
         recognizer.cancel()
     }
@@ -228,6 +233,7 @@ class RecognizerView(
         override fun updateMagnitude(magnitude: Float, state: MagnitudeState) {
             if(settings.shouldAnimateBubble) magnitudeState.floatValue = magnitude
             statusState.value = state
+            if (currentViewState.value != CurrentView.InnerRecognize) VoiceTiming.mark("UI switched to listening view")
             currentViewState.value = CurrentView.InnerRecognize
         }
 

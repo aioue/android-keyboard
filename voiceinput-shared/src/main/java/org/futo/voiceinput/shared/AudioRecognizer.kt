@@ -102,6 +102,12 @@ class AudioRecognizer(
     private var isRecording = false
     private var recorder: AudioRecord? = null
 
+    // Personal fork: while the user holds a finger on the voice panel, silence auto-stop (VAD) is
+    // suspended. The silence counter is pinned to 0 while held, so after release the normal
+    // silence timeout starts again from zero. Does not affect manual finish or the buffer cap.
+    @Volatile private var held = false
+    fun setHeld(value: Boolean) { held = value }
+
     private val modelRunner = MultiModelRunner(modelManager)
 
     private val canExpandSpace = settings.recordingConfiguration.canExpandSpace
@@ -255,6 +261,7 @@ class AudioRecognizer(
     }
 
     fun start() {
+        VoiceTiming.mark("AudioRecognizer.start")
         listener.loading()
 
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -331,11 +338,13 @@ class AudioRecognizer(
             yield()
             val nRead = recorder.read(samples, 0, 1600, AudioRecord.READ_BLOCKING)
             if (nRead <= 0) break
+            if (floatSamples.position() == 0) VoiceTiming.mark("first audio read returned")
             yield()
 
             var isRunningOutOfSpace = (floatSamples.remaining() < nRead.coerceAtLeast(1600)) && !expandSpaceIfAllowed()
 
-            val hasNotTalkedRecently = hasTalked && (numConsecutiveNonSpeech > 66) && useVAD
+            if (held) numConsecutiveNonSpeech = 0
+            val hasNotTalkedRecently = hasTalked && (numConsecutiveNonSpeech > 66) && useVAD && !held
             if (isRunningOutOfSpace || hasNotTalkedRecently) {
                 yield()
                 withContext(Dispatchers.Main) {
@@ -451,14 +460,18 @@ class AudioRecognizer(
         isRecording = false
         recorder?.stop()
 
+        VoiceTiming.mark("before setCommunicationDevice")
         val bluetoothInfo = setCommunicationDevice(preferBluetoothMic)
+        VoiceTiming.mark("after setCommunicationDevice")
 
         val task = {
             recorder?.release()
 
             val recorder = createAudioRecorder()
+            VoiceTiming.mark("AudioRecord created")
 
             recorder.startRecording()
+            VoiceTiming.mark("AudioRecord.startRecording returned")
             this.recorder = recorder
 
             isRecording = true
@@ -507,14 +520,18 @@ class AudioRecognizer(
             return
         }
 
+        VoiceTiming.mark("recorder job launched")
         focusAudio()
+        VoiceTiming.mark("audio focus done")
 
         listener.recordingStarted(device)
+        VoiceTiming.mark("recordingStarted callback done")
 
         loadModelJob = lifecycleScope.launch {
             withContext(Dispatchers.Default) {
                 try {
                     preloadModels()
+                    VoiceTiming.mark("models preloaded")
                 } catch(_: InvalidModelException) {
                     withContext(Dispatchers.Main) {
                         reset()
@@ -563,6 +580,7 @@ class AudioRecognizer(
             return
         }
 
+        VoiceTiming.mark("transcription done")
         val text = when {
             isBlankResult(outputText) -> ""
             else -> outputText
@@ -587,6 +605,7 @@ class AudioRecognizer(
         isRecording = false
         recorder?.stop()
 
+        VoiceTiming.mark("finish pressed; ${floatSamples.position() / 16000}s of audio")
         listener.processing()
 
         modelJob = lifecycleScope.launch {

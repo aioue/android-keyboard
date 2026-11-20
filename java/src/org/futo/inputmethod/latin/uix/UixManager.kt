@@ -653,6 +653,7 @@ class UixManager(private val latinIME: LatinIME) {
     val isMainKeyboardHidden get() = mainKeyboardHidden.value
 
     private fun onActionActivatedInternal(rawAction: Action, skipOverride: Boolean = false) {
+        if (rawAction == org.futo.inputmethod.latin.uix.actions.VoiceInputAction) org.futo.voiceinput.shared.VoiceTiming.mark("action dispatched")
         resizers.hideResizer()
 
         val action = if(skipOverride)
@@ -680,6 +681,7 @@ class UixManager(private val latinIME: LatinIME) {
     }
 
     fun onActionActivated(rawAction: Action) {
+        if (rawAction == org.futo.inputmethod.latin.uix.actions.VoiceInputAction) org.futo.voiceinput.shared.VoiceTiming.start("mic tapped")
         val event = Event.createSoftwareKeypressEvent(Constants.NOT_A_CODE, rawAction.keyCode, 0, 0, false)
         latinIME.imeManager.getActiveIME(
             Settings.getInstance().current

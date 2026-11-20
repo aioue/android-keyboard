@@ -1,7 +1,13 @@
 package org.futo.inputmethod.latin.uix.actions
 
 import android.content.Intent
+import android.os.SystemClock
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.util.fastAny
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -53,6 +59,7 @@ import org.futo.voiceinput.shared.RecognizerViewListener
 import org.futo.voiceinput.shared.RecognizerViewSettings
 import org.futo.voiceinput.shared.RecordingSettings
 import org.futo.voiceinput.shared.SoundPlayer
+import org.futo.voiceinput.shared.VoiceTiming
 import org.futo.voiceinput.shared.types.Language
 import org.futo.voiceinput.shared.types.ModelLoader
 import org.futo.voiceinput.shared.types.getLanguageFromWhisperString
@@ -99,9 +106,11 @@ fun NoModelInstalled(locale: Locale) {
 }
 
 class VoiceInputPersistentState(val manager: KeyboardManagerForAction) : PersistentActionState {
+    init { VoiceTiming.mark("persistent state creating") }
     val modelManager = ModelManager(manager.getContext())
     val soundPlayer: SoundPlayer? = if(ATLCompat.IsATL) null else SoundPlayer(manager.getContext())
     val userDictionaryObserver = UserDictionaryObserver(manager.getContext())
+    init { VoiceTiming.mark("persistent state created") }
 
     override suspend fun cleanUp() {
         modelManager.cleanUp()
@@ -168,8 +177,10 @@ private class VoiceInputActionWindow(
     private var modelException: MutableState<ModelDoesNotExistException?> = mutableStateOf(null)
 
     private val initJob = manager.getLifecycleScope().launch(Dispatchers.Default) {
+        VoiceTiming.mark("initJob started")
         yield()
         val settings = loadSettings()
+        VoiceTiming.mark("settings loaded")
 
         yield()
         val recognizerView = try {
@@ -185,10 +196,12 @@ private class VoiceInputActionWindow(
             return@launch
         }
 
+        VoiceTiming.mark("RecognizerView created")
         this@VoiceInputActionWindow.recognizerView.value = recognizerView
 
         //yield()
         recognizerView.reset()
+        VoiceTiming.mark("reset done")
 
         //yield()
         recognizerView.start()
@@ -206,14 +219,35 @@ private class VoiceInputActionWindow(
         return stringResource(R.string.action_voice_input_title)
     }
 
+    // Personal fork: how long the last touch on the panel lasted. A press longer than HOLD_MS is a
+    // hold (it suspends silence auto-stop while down) and must not also count as the tap that
+    // finishes the recording when the finger lifts.
+    private var lastPressMs = 0L
+    private val HOLD_MS = 350L
+
     @Composable
     override fun WindowContents(keyboardShown: Boolean) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { VoiceTiming.mark("voice window first composed") }
         Box(modifier = Modifier
             .fillMaxSize()
+            // Observes touches on the Initial pass without consuming them, so child buttons
+            // (Bluetooth toggle) and the tap below still work.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    val start = SystemClock.uptimeMillis()
+                    recognizerView.value?.setHeld(true)
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                    } while (event.changes.fastAny { it.pressed })
+                    lastPressMs = SystemClock.uptimeMillis() - start
+                    recognizerView.value?.setHeld(false)
+                }
+            }
             .clickable(
                 enabled = true,
                 onClickLabel = null,
-                onClick = { recognizerView.value?.finish() },
+                onClick = { if (lastPressMs < HOLD_MS) recognizerView.value?.finish() },
                 role = null,
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() })
@@ -250,6 +284,7 @@ private class VoiceInputActionWindow(
     }
 
     override fun recordingStarted(device: MicrophoneDeviceState) {
+        VoiceTiming.mark("window.recordingStarted")
         if (shouldPlaySounds) {
             state.soundPlayer?.playStartSound()
         }
@@ -308,6 +343,7 @@ val VoiceInputAction = Action(icon = R.drawable.mic_fill,
     keepScreenAwake = true,
     persistentState = { VoiceInputPersistentState(it) },
     windowImpl = { manager, persistentState ->
+        VoiceTiming.mark("windowImpl called")
         val locales = manager.getActiveLocales()
 
         val model = ResourceHelper.tryFindingVoiceInputModelForLocale(manager.getContext(), locales.firstOrNull() ?: Locale.ROOT)
