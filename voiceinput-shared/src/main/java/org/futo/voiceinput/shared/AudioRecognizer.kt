@@ -451,7 +451,7 @@ class AudioRecognizer(
     }
 
     @Throws(SecurityException::class)
-    private fun createRecorderAndJob(preferBluetoothMic: Boolean): MicrophoneDeviceState {
+    private fun createRecorderAndJob(preferBluetoothMic: Boolean, deferAvailabilityCheck: Boolean = false): MicrophoneDeviceState {
         isRecording = false
         recorder?.stop()
 
@@ -495,7 +495,9 @@ class AudioRecognizer(
 
 
         return MicrophoneDeviceState(
-            bluetoothAvailable = bluetoothInfo.first || isBluetoothAvailable(),
+            // Personal fork: when deferred, the (slow, variable) availability query is done after
+            // the listening UI is shown; see startRecording.
+            bluetoothAvailable = bluetoothInfo.first || (!deferAvailabilityCheck && isBluetoothAvailable()),
             bluetoothActive = bluetoothInfo.first,
             deviceName = bluetoothInfo.second,
             bluetoothPreferredByUser = settings.recordingConfiguration.preferBluetoothMic,
@@ -507,7 +509,7 @@ class AudioRecognizer(
 
     private fun startRecording() {
         val device = try {
-            createRecorderAndJob(settings.recordingConfiguration.preferBluetoothMic)
+            createRecorderAndJob(settings.recordingConfiguration.preferBluetoothMic, deferAvailabilityCheck = true)
         } catch (e: SecurityException) {
             // It's possible we may have lost permission, so let's just ask for permission again
             clearCommunicationDevice()
@@ -521,6 +523,12 @@ class AudioRecognizer(
 
         listener.recordingStarted(device)
         VoiceTiming.mark("recordingStarted callback done")
+
+        // Now that the UI is up, find out whether a Bluetooth mic is available and tell the UI.
+        if (!device.bluetoothAvailable && isBluetoothAvailable()) {
+            listener.deviceUpdated(device.copy(bluetoothAvailable = true))
+        }
+        VoiceTiming.mark("bluetooth availability checked")
 
         loadModelJob = lifecycleScope.launch {
             withContext(Dispatchers.Default) {

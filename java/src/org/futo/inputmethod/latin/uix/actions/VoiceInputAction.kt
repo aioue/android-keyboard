@@ -313,6 +313,15 @@ private class VoiceInputActionWindow(
             state.soundPlayer?.playStartSound()
         }
 
+        saveBluetoothPreference(device)
+    }
+
+    // Personal fork: availability is now reported after recordingStarted.
+    override fun deviceUpdated(device: MicrophoneDeviceState) {
+        saveBluetoothPreference(device)
+    }
+
+    private fun saveBluetoothPreference(device: MicrophoneDeviceState) {
         // Only set the setting if bluetooth is available, else it would reset the setting
         // every time it's used without a bluetooth device connected.
         if(device.bluetoothAvailable) {

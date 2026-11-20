@@ -18,6 +18,8 @@ interface AudioRecognizerListener {
     fun needPermission(onResult: (Boolean) -> Unit)
 
     fun recordingStarted(device: MicrophoneDeviceState)
+    // Personal fork: sent shortly after recordingStarted once Bluetooth availability is known.
+    fun deviceUpdated(device: MicrophoneDeviceState) {}
     fun updateMagnitude(magnitude: Float, state: MagnitudeState)
 
     fun processing()

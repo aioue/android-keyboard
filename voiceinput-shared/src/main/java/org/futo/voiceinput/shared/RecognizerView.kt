@@ -64,6 +64,9 @@ interface RecognizerViewListener {
 
     fun recordingStarted(device: MicrophoneDeviceState)
 
+    // Personal fork: Bluetooth availability became known after recordingStarted.
+    fun deviceUpdated(device: MicrophoneDeviceState) {}
+
     fun finished(result: String)
 
     fun partialResult(result: String)
@@ -228,6 +231,11 @@ class RecognizerView(
             updateMagnitude(0.0f, MagnitudeState.NOT_TALKED_YET)
             currentDeviceState.value = device
             listener.recordingStarted(device)
+        }
+
+        override fun deviceUpdated(device: MicrophoneDeviceState) {
+            currentDeviceState.value = device
+            listener.deviceUpdated(device)
         }
 
         override fun updateMagnitude(magnitude: Float, state: MagnitudeState) {
