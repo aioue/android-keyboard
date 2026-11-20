@@ -394,6 +394,7 @@ class LatinIME : InputMethodServiceCompose(), LatinIMELegacy.SuggestionStripCont
         DataStoreHelper.init(this)
         org.futo.inputmethod.latin.diag.DiagLog.init(this)
         org.futo.inputmethod.latin.diag.DiagSwipeHooks.latinIme = java.lang.ref.WeakReference(this)
+        org.futo.inputmethod.latin.diag.DiagDictImport.runIfPresent(this)
 
         val filter = IntentFilter(Intent.ACTION_USER_UNLOCKED)
         registerReceiver(unlockReceiver, filter)
