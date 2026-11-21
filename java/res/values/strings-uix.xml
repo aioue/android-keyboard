@@ -603,6 +603,8 @@
     <string name="voice_input_settings_long_form_subtitle">If disabled, voice input will auto-stop after 30 seconds.</string>
     <string name="voice_input_settings_prewarm_recorder">Pre-warm recorder</string>
     <string name="voice_input_settings_prewarm_recorder_subtitle">Prepare the microphone recorder while the keyboard is open so voice input starts about 50-100 ms sooner. Nothing is recorded until you press the mic.</string>
+    <string name="voice_input_settings_chunk_long">Transcribe long recordings in chunks</string>
+    <string name="voice_input_settings_chunk_long_subtitle">While you speak, text is transcribed at pauses so the wait after finishing stays short. Needs auto-stop on silence enabled. Uses extra CPU during long recordings.</string>
     <string name="voice_input_settings_autostop_vad">Auto-stop on silence</string>
     <string name="voice_input_settings_autostop_vad_subtitle">Automatically stop when silence is detected. You may need to manually stop regardless if there\'s too much background noise.</string>
     <string name="voice_input_settings_animate_bubble">Animations</string>

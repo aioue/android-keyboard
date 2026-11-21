@@ -82,7 +82,8 @@ data class RecordingSettings(
     val requestAudioFocus: Boolean,
     val canExpandSpace: Boolean,
     val useVADAutoStop: Boolean,
-    val usePrewarmedRecorder: Boolean = false
+    val usePrewarmedRecorder: Boolean = false,
+    val chunkLongRecordings: Boolean = false
 )
 
 data class AudioRecognizerSettings(
@@ -222,7 +223,84 @@ class AudioRecognizer(
         verifyModelsExist()
     }
 
+    // ---- Personal fork: transcribe long recordings in chunks while still recording ----
+    // When enough speech has built up and the speaker pauses, the finished stretch is transcribed
+    // in the background (strictly in order, on the single model thread) so that at the end only the
+    // last stretch is left to process. Falls back to one full pass if anything goes wrong.
+    private val chunkingEnabled = settings.recordingConfiguration.chunkLongRecordings
+    private val CHUNK_MIN_SAMPLES = 16000 * 12      // don't cut before 12 s have built up
+    private val CHUNK_SOFT_MAX_SAMPLES = 16000 * 20 // after 20 s accept a shorter pause
+    private val CHUNK_PAUSE_FRAMES = 23             // VAD frames are 30 ms: about 0.7 s of silence
+    private val CHUNK_PAUSE_FRAMES_SHORT = 13       // about 0.4 s
+    private val CHUNK_MIN_SPEECH_FRAMES = 20        // a chunk must contain at least ~0.6 s of speech
+    private val TAIL_MIN_SPEECH_FRAMES = 5          // skip a final pass that is only silence
+
+    private var chunkStart = 0                      // first sample not yet handed to a chunk
+    @Volatile private var speechFramesSinceCut = 0
+    private val chunkTexts = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private var chunkChain: Job? = null
+    @Volatile private var chunkFailed = false
+
+    // Chunk runs are invisible to the UI: no "processing" circle, no partial text in the field.
+    private val silentCallback = object : ModelInferenceCallback {
+        override fun updateStatus(state: InferenceState) {}
+        override fun languageDetected(language: Language) {}
+        override fun partialResult(string: String) {}
+    }
+
+    private fun tailOf(text: String): String {
+        if (text.length <= 200) return text
+        val t = text.takeLast(200)
+        val sp = t.indexOf(' ')
+        return if (sp >= 0) t.substring(sp + 1) else t
+    }
+
+    private fun maybeCutChunk(nonSpeechFrames: Int) {
+        if (!chunkingEnabled || chunkFailed) return
+        val end = floatSamples.position()
+        val unprocessed = end - chunkStart
+        if (unprocessed < CHUNK_MIN_SAMPLES || speechFramesSinceCut < CHUNK_MIN_SPEECH_FRAMES) return
+        val needed = if (unprocessed >= CHUNK_SOFT_MAX_SAMPLES) CHUNK_PAUSE_FRAMES_SHORT else CHUNK_PAUSE_FRAMES
+        if (nonSpeechFrames < needed) return
+
+        val audio = floatSamples.array().copyOfRange(chunkStart, end)
+        chunkStart = end
+        speechFramesSinceCut = 0
+        val idx = chunkTexts.size
+        chunkTexts.add("")
+        VoiceTiming.mark("chunk $idx cut: ${audio.size / 16000}s of audio")
+
+        val prev = chunkChain
+        chunkChain = lifecycleScope.launch(Dispatchers.Default) {
+            prev?.join()
+            loadModelJob?.join()
+            val before = synchronized(chunkTexts) { chunkTexts.subList(0, idx).filter { it.isNotBlank() }.joinToString(" ") }
+            try {
+                val text = modelRunner.run(
+                    audio,
+                    settings.modelRunConfiguration,
+                    settings.decodingConfiguration.copy(previousText = tailOf(before)),
+                    silentCallback
+                ).trim()
+                chunkTexts[idx] = if (isBlankResult(text)) "" else text
+                VoiceTiming.mark("chunk $idx transcribed")
+            } catch (e: InferenceCancelledException) {
+                // Recording was cancelled; nothing to do.
+            } catch (e: Exception) {
+                chunkFailed = true
+                VoiceTiming.mark("chunk $idx failed: ${e.javaClass.simpleName}")
+            }
+        }
+    }
+
     fun reset() {
+        chunkChain?.cancel()
+        chunkChain = null
+        chunkTexts.clear()
+        chunkStart = 0
+        speechFramesSinceCut = 0
+        chunkFailed = false
+
         recorder?.stop()
         recorderJob?.cancel()
 
@@ -338,7 +416,6 @@ class AudioRecognizer(
 
             var isRunningOutOfSpace = (floatSamples.remaining() < nRead.coerceAtLeast(1600)) && !expandSpaceIfAllowed()
 
-            if (held) numConsecutiveNonSpeech = 0
             val hasNotTalkedRecently = hasTalked && (numConsecutiveNonSpeech > 66) && useVAD && !held
             if (isRunningOutOfSpace || hasNotTalkedRecently) {
                 yield()
@@ -364,6 +441,7 @@ class AudioRecognizer(
                         } else {
                             numConsecutiveNonSpeech = 0
                             numConsecutiveSpeech++
+                            speechFramesSinceCut++
                         }
                     }
 
@@ -379,6 +457,8 @@ class AudioRecognizer(
             }
 
             floatSamples.put(samples.sliceArray(0 until nRead).map { it.toFloat() / Short.MAX_VALUE.toFloat() }.toFloatArray())
+
+            if (useVAD && vad != null) maybeCutChunk(numConsecutiveNonSpeech)
 
             // Don't set hasTalked if the start sound may still be playing, otherwise on some
             // devices the rms just explodes and `hasTalked` is always true
@@ -568,20 +648,39 @@ class AudioRecognizer(
             }
         }
 
-        val floatArray = floatSamples.array().sliceArray(0 until floatSamples.position())
+        // Personal fork: make sure the recording loop has stopped (no more cuts), then wait for any
+        // chunk still being transcribed.
+        recorderJob?.join()
+        chunkChain?.join()
+
+        val end = floatSamples.position()
+        val chunksOk = chunkTexts.isNotEmpty() && !chunkFailed
+        val startIdx = if (chunksOk) chunkStart else 0
+        val prefix = if (chunksOk) synchronized(chunkTexts) { chunkTexts.filter { it.isNotBlank() }.joinToString(" ") } else ""
+        val skipTail = chunksOk && speechFramesSinceCut < TAIL_MIN_SPEECH_FRAMES
+        VoiceTiming.mark("final pass: ${(end - startIdx) / 16000}s of audio, ${chunkTexts.size} earlier chunks, ${if (skipTail) "tail skipped" else "tail run"}")
+
+        val floatArray = floatSamples.array().copyOfRange(startIdx, end)
+
+        val callback = if (prefix.isEmpty()) runnerCallback else object : ModelInferenceCallback {
+            override fun updateStatus(state: InferenceState) = runnerCallback.updateStatus(state)
+            override fun languageDetected(language: Language) = runnerCallback.languageDetected(language)
+            override fun partialResult(string: String) = runnerCallback.partialResult("$prefix $string")
+        }
 
         yield()
-        val outputText = try {
+        val tailText = if (skipTail) "" else try {
              modelRunner.run(
                 floatArray,
                 settings.modelRunConfiguration,
-                settings.decodingConfiguration,
-                runnerCallback
-            ).trim()
+                settings.decodingConfiguration.copy(previousText = tailOf(prefix)),
+                callback
+            ).trim().let { if (isBlankResult(it)) "" else it }
         }catch(e: InferenceCancelledException) {
             yield()
             return
         }
+        val outputText = listOf(prefix, tailText).filter { it.isNotBlank() }.joinToString(" ")
 
         VoiceTiming.mark("transcription done")
         val text = when {

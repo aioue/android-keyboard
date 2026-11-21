@@ -50,6 +50,12 @@ val PREWARM_RECORDER = SettingsKey(
     default = true
 )
 
+// Personal fork: transcribe long recordings in chunks at pauses while still recording.
+val CHUNK_LONG_RECORDINGS = SettingsKey(
+    key = booleanPreferencesKey("chunk_long_recordings"),
+    default = true
+)
+
 val USE_VAD_AUTOSTOP = SettingsKey(
     key = booleanPreferencesKey("use_vad_autostop"),
     default = true

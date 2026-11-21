@@ -44,6 +44,7 @@ import org.futo.inputmethod.latin.uix.ENABLE_SOUND
 import org.futo.inputmethod.latin.uix.KeyboardManagerForAction
 import org.futo.inputmethod.latin.uix.PREFER_BLUETOOTH
 import org.futo.inputmethod.latin.uix.PREWARM_RECORDER
+import org.futo.inputmethod.latin.uix.CHUNK_LONG_RECORDINGS
 import org.futo.inputmethod.latin.uix.PersistentActionState
 import org.futo.inputmethod.latin.uix.ResourceHelper
 import org.futo.inputmethod.latin.uix.USE_PERSONAL_DICT
@@ -142,6 +143,7 @@ private class VoiceInputActionWindow(
         val usePersonalDict = context.getSetting(USE_PERSONAL_DICT)
         val animateBubble = context.getSetting(ANIMATE_BUBBLE)
         val prewarm = context.getSetting(PREWARM_RECORDER)
+        val chunkLong = context.getSetting(CHUNK_LONG_RECORDINGS)
 
         val primaryModel = model
         val languageSpecificModels = mutableMapOf<Language, ModelLoader>()
@@ -172,7 +174,8 @@ private class VoiceInputActionWindow(
                 requestAudioFocus = requestAudioFocus,
                 canExpandSpace = canExpandSpace,
                 useVADAutoStop = useVAD,
-                usePrewarmedRecorder = prewarm
+                usePrewarmedRecorder = prewarm,
+                chunkLongRecordings = chunkLong
             )
         )
     }

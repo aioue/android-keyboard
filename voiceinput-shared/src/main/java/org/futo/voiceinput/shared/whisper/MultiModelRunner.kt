@@ -23,7 +23,10 @@ data class MultiModelRunConfiguration(
 data class DecodingConfiguration(
     val glossary: List<String>,
     val languages: Set<Language>,
-    val suppressSymbols: Boolean
+    val suppressSymbols: Boolean,
+    // Personal fork: end of the text already transcribed from earlier chunks of the same recording,
+    // given to the model as context so a chunk continues the previous one.
+    val previousText: String = ""
 )
 
 class MultiModelRunner(
@@ -65,12 +68,13 @@ class MultiModelRunner(
         } else {
             ""
         }
+        val prompt = listOf(glossary, decodingConfiguration.previousText).filter { it.isNotBlank() }.joinToString(" ")
 
         val result = try {
             callback.updateStatus(InferenceState.Encoding)
             primaryModel.infer(
                 samples = samples,
-                prompt = glossary,
+                prompt = prompt,
                 languages = allowedLanguages,
                 bailLanguages = bailLanguages,
                 decodingMode = DecodingMode.BeamSearch5,
@@ -88,7 +92,7 @@ class MultiModelRunner(
 
             specificModel.infer(
                 samples = samples,
-                prompt = glossary,
+                prompt = prompt,
                 languages = arrayOf(e.language),
                 bailLanguages = arrayOf(),
                 decodingMode = DecodingMode.BeamSearch5,
