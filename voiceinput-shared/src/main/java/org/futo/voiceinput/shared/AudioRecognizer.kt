@@ -242,9 +242,9 @@ class AudioRecognizer(
     // repeated words in their results are collapsed, and no partial text is streamed (see runModel).
     private val SHORT_CLIP_SAMPLES = 16000 * 2
     private val TAIL_MIN_SPEECH_FRAMES = 5          // skip a final pass that is only silence
-    // A clip under MIN_MODEL_SAMPLES is padded and transcribed only if VAD counted at least this many
-    // speech frames (30 ms each) in it. Measured on a Pixel 8a: silent taps 0, quick spoken words
-    // 3-12. Without VAD there is no such count, so short clips are not padded, as before.
+    // With VAD on, a clip is transcribed only if VAD counted at least this many speech frames (30 ms
+    // each) in it. Measured on a Pixel 8a: silent taps 0, spoken clips 3-24. Without VAD there is no
+    // such count, so short clips are not padded, as before.
     private val CLIP_MIN_SPEECH_FRAMES = 3
 
     private var chunkStart = 0                      // first sample not yet handed to a chunk
@@ -663,17 +663,20 @@ class AudioRecognizer(
         val chunksOk = chunkTexts.isNotEmpty() && !chunkFailed
         val startIdx = if (chunksOk) chunkStart else 0
         val prefix = if (chunksOk) synchronized(chunkTexts) { chunkTexts.filter { it.isNotBlank() }.joinToString(" ") } else ""
-        // A clip under MIN_MODEL_SAMPLES is padded (below) only when VAD heard speech in it: padded
-        // near-silence made Whisper invent text in testing. Otherwise it is skipped: unpadded,
-        // whisper.cpp returns nothing for it anyway (except 16200-17599 samples, which it would run
-        // as they are). speechFramesSinceCut covers [startIdx, end) whenever that is short, because
-        // a failed chunk run (startIdx 0) means the clip is over CHUNK_MIN_SAMPLES.
+        // With VAD on, a clip with fewer than CLIP_MIN_SPEECH_FRAMES speech frames is not transcribed:
+        // Whisper invents text from silence, seen on 1.3-1.4 s silent taps (0 frames) that the model
+        // was allowed to run on, while every spoken clip counted at least 4. A clip under
+        // MIN_MODEL_SAMPLES is also skipped when VAD is off (no count to go by): unpadded, whisper.cpp
+        // returns nothing for it anyway (except 16200-17599 samples, which it would run as they are).
+        // speechFramesSinceCut covers [startIdx, end) when no chunk was cut; after a cut it only
+        // counts the audio since, so that case is not judged by it (chunkTexts must be empty).
         // This replaces a 0.4 s floor added after a volume-button tap right after a dictation typed
         // that dictation again. Before padding, whisper.cpp could not return any text for such a
-        // clip (the check above), so that symptom has another cause; see the empty-commit guard in
+        // clip, so that symptom has another cause; see the empty-commit guard in
         // ActionInputTransactionIME.commit.
         val tooShortForModel = (end - startIdx) < MIN_MODEL_SAMPLES
-        val noSpeech = tooShortForModel && !(useVAD && speechFramesSinceCut >= CLIP_MIN_SPEECH_FRAMES)
+        val noSpeech = chunkTexts.isEmpty() &&
+            (if (useVAD) speechFramesSinceCut < CLIP_MIN_SPEECH_FRAMES else tooShortForModel)
         val skipTail = noSpeech || (chunksOk && speechFramesSinceCut < TAIL_MIN_SPEECH_FRAMES)
         VoiceTiming.mark("final pass: ${end - startIdx} samples, ${chunkTexts.size} earlier chunks, speechFrames=$speechFramesSinceCut, noSpeech=$noSpeech, ${if (skipTail) "tail skipped" else "tail run"}")
 
