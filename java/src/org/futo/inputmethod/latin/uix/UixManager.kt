@@ -747,8 +747,14 @@ class UixManager(private val latinIME: LatinIME) {
         return true
     }
 
+    // T3 Code's reply box treats plain Enter as a newline and sends on Ctrl+Enter (its green send
+    // button). Other apps get the keyboard's normal Enter, which runs the field's Send/Search/Go action.
     private fun sendSubmitEnter() {
-        keyboardManagerForAction.sendCodePointEvent(Constants.CODE_ENTER)
+        if (latinIME.currentInputEditorInfo?.packageName == "com.t3tools.t3code") {
+            keyboardManagerForAction.sendKeyEvent(android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.META_CTRL_ON)
+        } else {
+            keyboardManagerForAction.sendCodePointEvent(Constants.CODE_ENTER)
+        }
     }
 
     fun onVolumeUpUp(): Boolean {
