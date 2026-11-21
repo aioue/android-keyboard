@@ -16,6 +16,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 class DiagSubmitService : AccessibilityService() {
     companion object {
         const val T3_PACKAGE = "com.t3tools.t3code"
+        // The app finishes clearing the box and animating shortly after the click; retry until it sticks.
+        private val REFOCUS_DELAYS_MS = longArrayOf(150, 450, 900)
         private val SEND_LABELS = setOf("Send", "Queue", "Steer", "Restart", "Update queued message")
 
         @Volatile
@@ -47,7 +49,33 @@ class DiagSubmitService : AccessibilityService() {
         while (node != null && !node.isClickable) node = node.parent
         val ok = node != null && node.isEnabled && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         Log.d("DiagSubmit", "clicked=$ok label=${button.contentDescription}")
+        if (ok) {
+            // A tap on the button via accessibility leaves the reply box unfocused (and the keyboard
+            // closing); a finger tap doesn't. Put focus back so you can dictate the next message.
+            for (delay in REFOCUS_DELAYS_MS) handler.postDelayed({ refocusInput() }, delay)
+        }
         return ok
+    }
+
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private fun refocusInput() {
+        val root = rootInActiveWindow ?: return
+        if (root.packageName != T3_PACKAGE) return
+        val input = findInput(root) ?: return
+        if (input.isFocused) return
+        val ok = input.performAction(AccessibilityNodeInfo.ACTION_FOCUS) ||
+            input.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        Log.d("DiagSubmit", "refocus=$ok")
+    }
+
+    private fun findInput(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        if (node.isEditable || node.className == "android.widget.EditText") return node
+        for (i in 0 until node.childCount) {
+            val found = node.getChild(i)?.let { findInput(it) }
+            if (found != null) return found
+        }
+        return null
     }
 
     private fun findSendButton(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
