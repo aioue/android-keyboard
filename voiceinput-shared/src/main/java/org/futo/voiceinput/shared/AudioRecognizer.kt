@@ -156,26 +156,21 @@ class AudioRecognizer(
         }
     }
 
-    private fun isBluetoothAvailable(): Boolean {
+    // bluetoothAvailable comes from the same device list used to pick the device, so callers don't
+    // need a second availableCommunicationDevices query.
+    private data class CommunicationDeviceInfo(
+        val bluetoothActive: Boolean,
+        val name: String,
+        val bluetoothAvailable: Boolean
+    )
+
+    private fun setCommunicationDevice(preferBluetoothMic: Boolean): CommunicationDeviceInfo {
+        var bluetoothAvailable = false
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 val devices = audioManager.availableCommunicationDevices
-
-                return devices.firstOrNull {
-                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-                } != null
-            }
-        } catch(_: Exception) {}
-
-        return false
-    }
-
-    private fun setCommunicationDevice(preferBluetoothMic: Boolean): Pair<Boolean, String> {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                val devices = audioManager.availableCommunicationDevices
+                bluetoothAvailable = devices.any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
                 val tgtDevice =
                     devices.firstOrNull { preferBluetoothMic && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO } ?:
                     devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC } ?:
@@ -184,13 +179,17 @@ class AudioRecognizer(
 
                 if (!audioManager.setCommunicationDevice(tgtDevice)) {
                     audioManager.clearCommunicationDevice()
-                    return Pair(false, "")
+                    return CommunicationDeviceInfo(false, "", bluetoothAvailable)
                 } else {
-                    return Pair(tgtDevice.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO, tgtDevice.productName.toString())
+                    return CommunicationDeviceInfo(
+                        tgtDevice.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                        tgtDevice.productName.toString(),
+                        bluetoothAvailable
+                    )
                 }
             }
         } catch(_: Exception) {}
-        return Pair(false, "")
+        return CommunicationDeviceInfo(false, "", bluetoothAvailable)
     }
 
     private fun clearCommunicationDevice() {
@@ -532,7 +531,7 @@ class AudioRecognizer(
     }
 
     @Throws(SecurityException::class)
-    private fun createRecorderAndJob(preferBluetoothMic: Boolean, deferAvailabilityCheck: Boolean = false): MicrophoneDeviceState {
+    private fun createRecorderAndJob(preferBluetoothMic: Boolean): MicrophoneDeviceState {
         isRecording = false
         recorder?.stop()
 
@@ -576,11 +575,9 @@ class AudioRecognizer(
 
 
         return MicrophoneDeviceState(
-            // Personal fork: when deferred, the (slow, variable) availability query is done after
-            // the listening UI is shown; see startRecording.
-            bluetoothAvailable = bluetoothInfo.first || (!deferAvailabilityCheck && isBluetoothAvailable()),
-            bluetoothActive = bluetoothInfo.first,
-            deviceName = bluetoothInfo.second,
+            bluetoothAvailable = bluetoothInfo.bluetoothActive || bluetoothInfo.bluetoothAvailable,
+            bluetoothActive = bluetoothInfo.bluetoothActive,
+            deviceName = bluetoothInfo.name,
             bluetoothPreferredByUser = settings.recordingConfiguration.preferBluetoothMic,
             setBluetooth = {
                 listener.recordingStarted(createRecorderAndJob(it))
@@ -590,7 +587,7 @@ class AudioRecognizer(
 
     private fun startRecording() {
         val device = try {
-            createRecorderAndJob(settings.recordingConfiguration.preferBluetoothMic, deferAvailabilityCheck = true)
+            createRecorderAndJob(settings.recordingConfiguration.preferBluetoothMic)
         } catch (e: SecurityException) {
             // It's possible we may have lost permission, so let's just ask for permission again
             clearCommunicationDevice()
@@ -605,10 +602,6 @@ class AudioRecognizer(
         listener.recordingStarted(device)
         VoiceTiming.mark("recordingStarted callback done")
 
-        // Now that the UI is up, find out whether a Bluetooth mic is available and tell the UI.
-        if (!device.bluetoothAvailable && isBluetoothAvailable()) {
-            listener.deviceUpdated(device.copy(bluetoothAvailable = true))
-        }
         VoiceTiming.mark("bluetooth availability checked")
 
         loadModelJob = lifecycleScope.launch {
