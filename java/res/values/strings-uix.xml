@@ -726,4 +726,7 @@ Default is %1$s</string>
     <string name="personal_dictionary_delete_additional_file_text">%1$s will be deleted</string>
     <string name="diag_submit_service_label" translatable="false">FUTO diag: submit in T3 Code</string>
     <string name="diag_submit_service_description" translatable="false">Lets the keyboard tap T3 Code\'s send button when you press volume down while holding volume up to dictate. Only reads T3 Code\'s screen, only to find that button.</string>
+    <string name="diag_log_setting_title" translatable="false">Diagnostic log (personal fork)</string>
+    <string name="diag_log_setting_subtitle" translatable="false">Encrypted log of swipe, autocorrect and voice events. Off by default. This is the same switch as the toolbar icon, which is red while the log is on.</string>
+    <string name="diag_log_setting_failed" translatable="false">Diagnostic log can\'t change: %1$s</string>
 </resources>

@@ -1,3 +1,25 @@
+# Personal fork: what is changed here
+
+This is a personal fork of FUTO Keyboard (branch `diag-log`). Nothing here has been pushed upstream. Everything changed compared with `futo-org/android-keyboard` master is listed below. "Fork only" means it is not meant for upstream. "Upstream candidate" means a clean local branch off master exists (`pr/...`); none has been raised.
+
+- **Diagnostic log** (fork only): an encrypted local log of swipe, autocorrect and backspace events, with toolbar actions to switch it on or off (the icon is red while it is on), view, export and clear. It is off by default. Settings > Misc has a switch that shows the same state as the red icon. It is encrypted to a public key built into the app; the private key stays on the Mac (`tools/diaglog`).
+- **Swipe language-model fix** (fork only): copies `scoring.json` next to the swipe models and reports the model under its old codename, so the scoring weight is not zero (upstream issue #2405). Also a one-shot personal dictionary import and extra swipe language-model details in the log.
+- **Hold volume up to dictate** (fork only): hold volume up with the keyboard shown to dictate, release to finish. A quick tap still changes the volume.
+- **Volume down submits** (fork only): while holding volume up, volume down finishes dictation and presses Enter. In T3 Code it taps the send button through an accessibility service and reopens the keyboard.
+- **Hold the voice panel to pause silence auto-stop** (fork only).
+- **Long dictation in chunks** (fork only): long recordings are transcribed in pieces at pauses while still recording. Behind a setting.
+- **Pre-warmed recorder** (setting; upstream candidate, parked): creates the voice recorder while the keyboard is shown, which was about 67 ms faster to first audio in testing. It is released when the keyboard hides, is built outside the lock so hiding does not stall, and is skipped when the system voice input is selected. Branch `pr/voice-recorder-prewarm` does not have the stall fix.
+- **Quick words are transcribed** (upstream candidate: `pr/voice-short-clips`): whisper.cpp returns nothing for clips under about 1 s, so shorter clips are padded to 1.1 s, but only when the voice detector heard enough speech (at least 4 speech frames, ignoring the first 150 ms).
+- **Silent recordings are not transcribed** (upstream candidate: `pr/voice-skip-no-speech`, not to be raised before about 600 presses of testing): a recording with fewer than 4 speech frames, of any length, is not sent to Whisper, because Whisper makes up text for silence. The upstream branch uses a stricter test (no speech frames at all) than this fork.
+- **Bluetooth availability check** (upstream candidate: `pr/voice-bt-single-query`): the first device list is reused instead of asking Android for it a second time, which brings the listening screen forward by about 18-30 ms.
+- **Short-clip guards** (fork only): decoder limited to 32 steps for clips under 2 s (separate local branch `pr/voice-decoder-cap`, parked), a word repeated three or more times in a short result is collapsed, and no live partial text is shown for clips under 2 s.
+- **Empty voice result** (fork only): an empty result no longer overwrites text that is being composed.
+- **Voice timing marks** (fork only): timing and result word count in the `VoiceTiming` log tag, for measuring.
+
+Rejected after testing: a filter for the text "♪ ♪" (`pr/voice-blank-music-note`). Skipping silent recordings covers it and the other made-up text.
+
+---
+
 # FUTO Keyboard
 
 The goal is to make a good modern keyboard that stays offline and doesn't spy on you. This keyboard is a fork of [LatinIME, The Android Open-Source Keyboard](https://android.googlesource.com/platform/packages/inputmethods/LatinIME), with significant changes made to it.
