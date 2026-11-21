@@ -239,10 +239,8 @@ class AudioRecognizer(
     // zeros anyway, and audio_ctx is 160 for any clip this short); it only gets past that check.
     private val MIN_MODEL_SAMPLES = 16000 * 11 / 10
     // Clips under 2 s: the decoder is capped at 32 tokens for them in WhisperGGML.cpp (same limit),
-    // and repeated words in their results are collapsed (see runModel).
+    // repeated words in their results are collapsed, and no partial text is streamed (see runModel).
     private val SHORT_CLIP_SAMPLES = 16000 * 2
-    // Streaming partial text saves little time on short speech, so only clips of 4 s or more stream.
-    private val STREAM_PARTIALS_SAMPLES = 16000 * 4
     private val TAIL_MIN_SPEECH_FRAMES = 5          // skip a final pass that is only silence
     // A clip under MIN_MODEL_SAMPLES is padded and transcribed only if VAD counted at least this many
     // speech frames (30 ms each) in it. Measured on a Pixel 8a: silent taps 0, quick spoken words
@@ -685,10 +683,9 @@ class AudioRecognizer(
         val floatArray = if (tooShortForModel) speech.copyOf(MIN_MODEL_SAMPLES) else speech
 
         val isShortClip = speech.size < SHORT_CLIP_SAMPLES
-        val callback = if (speech.size < STREAM_PARTIALS_SAMPLES && prefix.isEmpty()) object : ModelInferenceCallback {
-            // A clip this short is transcribed in about a second, and a repetition loop would be
-            // typed into the field as composing text before being cleaned up, so only the final
-            // result is shown.
+        val callback = if (isShortClip && prefix.isEmpty()) object : ModelInferenceCallback {
+            // The final text of a short clip is post-processed (collapseRepeats), so partial text
+            // would show a repetition loop in the field before the result replaces it.
             override fun updateStatus(state: InferenceState) = runnerCallback.updateStatus(state)
             override fun languageDetected(language: Language) = runnerCallback.languageDetected(language)
             override fun partialResult(string: String) {}
