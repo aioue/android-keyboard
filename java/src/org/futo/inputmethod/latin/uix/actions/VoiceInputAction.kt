@@ -334,8 +334,9 @@ private class VoiceInputActionWindow(
         recognizerView.value?.cancel()
         state.modelManager.cancelAll()
         // Personal fork: the recorder was consumed by this session; prepare the next one.
+        val prewarmRequestedAt = org.futo.voiceinput.shared.RecorderPrewarm.generation
         manager.getLifecycleScope().launch(Dispatchers.Default) {
-            if (context.getSetting(PREWARM_RECORDER)) org.futo.voiceinput.shared.RecorderPrewarm.prewarm(context)
+            if (context.getSetting(PREWARM_RECORDER)) org.futo.voiceinput.shared.RecorderPrewarm.prewarm(context, prewarmRequestedAt)
         }
         return CloseResult.Default
     }

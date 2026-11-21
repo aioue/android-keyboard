@@ -25,6 +25,13 @@ object RecorderPrewarm {
     private var warm: AudioRecord? = null
     private val releaseRunnable = Runnable { release() }
 
+    // Bumped by every release(). prewarm() runs after an asynchronous settings read, so a request
+    // made before a release (the voice window closing as the keyboard hides calls prewarm, then
+    // onFinishInputView calls release) would otherwise create a recorder after the keyboard hid.
+    // Callers read this on the main thread when they decide to prewarm and pass it in.
+    @Volatile var generation = 0
+        private set
+
     // Same parameters as AudioRecognizer's own recorder, so the two are interchangeable.
     fun create(): AudioRecord {
         val recorder = AudioRecord(
@@ -40,10 +47,14 @@ object RecorderPrewarm {
         return recorder
     }
 
-    /** Call from a background thread. Does nothing without mic permission or if already warm. */
-    fun prewarm(context: Context) {
+    /**
+     * Call from a background thread with [generation] as read when the prewarm was requested. Does
+     * nothing without mic permission, if already warm, or if release() ran since that read.
+     */
+    fun prewarm(context: Context, requestedAt: Int) {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
         synchronized(this) {
+            if (requestedAt != generation) return
             if (warm == null) {
                 warm = try {
                     create().takeIf { it.state == AudioRecord.STATE_INITIALIZED } ?: run { return }
@@ -68,6 +79,7 @@ object RecorderPrewarm {
 
     @Synchronized
     fun release() {
+        generation++
         handler.removeCallbacks(releaseRunnable)
         warm?.release()
         warm = null

@@ -638,8 +638,9 @@ class LatinIME : InputMethodServiceCompose(), LatinIMELegacy.SuggestionStripCont
         latinIMELegacy.onStartInputView(info, restarting)
         lifecycleScope.launch { uixManager.showUpdateNoticeIfNeeded() }
         // Personal fork: pre-create the voice recorder (setting-gated) so the mic starts sooner.
+        val prewarmRequestedAt = org.futo.voiceinput.shared.RecorderPrewarm.generation
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) {
-            if (applicationContext.getSetting(org.futo.inputmethod.latin.uix.PREWARM_RECORDER)) org.futo.voiceinput.shared.RecorderPrewarm.prewarm(applicationContext)
+            if (applicationContext.getSetting(org.futo.inputmethod.latin.uix.PREWARM_RECORDER)) org.futo.voiceinput.shared.RecorderPrewarm.prewarm(applicationContext, prewarmRequestedAt)
         }
         updateColorsIfDynamicChanged()
         uixManager.updateEmojiTranslationsIfNeeded()
