@@ -59,14 +59,18 @@ class DiagSubmitService : AccessibilityService() {
 
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
+    // Sending leaves the reply box unfocused and T3 hides the keyboard. ACTION_FOCUS only moves focus;
+    // clicking the box is what brings the keyboard back. Both checks are needed: the box can be
+    // focused with the keyboard hidden.
     private fun refocusInput() {
         val root = rootInActiveWindow ?: return
         if (root.packageName != T3_PACKAGE) return
         val input = findInput(root) ?: return
-        if (input.isFocused) return
-        val ok = input.performAction(AccessibilityNodeInfo.ACTION_FOCUS) ||
-            input.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        Log.d("DiagSubmit", "refocus=$ok")
+        val imeShown = DiagSwipeHooks.latinIme?.get()?.isInputViewShown == true
+        if (input.isFocused && imeShown) return
+        var ok = input.isFocused || input.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        if (!imeShown) ok = input.performAction(AccessibilityNodeInfo.ACTION_CLICK) || ok
+        Log.d("DiagSubmit", "refocus=$ok focused=${input.isFocused} imeShown=$imeShown")
     }
 
     private fun findInput(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
