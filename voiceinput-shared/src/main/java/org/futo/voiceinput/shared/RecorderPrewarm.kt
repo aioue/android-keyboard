@@ -57,7 +57,9 @@ object RecorderPrewarm {
             if (requestedAt != generation) return
             if (warm == null) {
                 warm = try {
-                    create().takeIf { it.state == AudioRecord.STATE_INITIALIZED } ?: run { return }
+                    create().let { r ->
+                        if (r.state == AudioRecord.STATE_INITIALIZED) r else { r.release(); return }
+                    }
                 } catch (e: Exception) {
                     null
                 }
