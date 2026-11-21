@@ -125,11 +125,44 @@ class VoiceInputPersistentState(val manager: KeyboardManagerForAction) : Persist
     }
 }
 
+/** Personal fork: lets a hardware button (volume up) act like holding a finger on the voice panel. */
+interface HoldToTalkWindow {
+    fun beginExternalHold()
+    fun endExternalHold()
+}
+
 private class VoiceInputActionWindow(
     val manager: KeyboardManagerForAction, val state: VoiceInputPersistentState,
     val model: ModelLoader, val locales: List<Locale>
-) : ActionWindow(), RecognizerViewListener {
+) : ActionWindow(), RecognizerViewListener, HoldToTalkWindow {
     val context = manager.getContext()
+
+    // Silence auto-stop is suspended while either a finger or the volume button is held.
+    @Volatile private var fingerHeld = false
+    @Volatile private var externalHold = false
+    @Volatile private var finishAfterStart = false
+
+    private fun setFingerHeld(held: Boolean) {
+        fingerHeld = held
+        recognizerView.value?.setHeld(fingerHeld || externalHold)
+    }
+
+    override fun beginExternalHold() {
+        externalHold = true
+        recognizerView.value?.setHeld(true)
+    }
+
+    override fun endExternalHold() {
+        externalHold = false
+        val rv = recognizerView.value
+        if (rv == null) {
+            // Released before the recognizer finished setting up: finish as soon as it has started.
+            finishAfterStart = true
+        } else {
+            rv.setHeld(fingerHeld)
+            rv.finish()
+        }
+    }
 
     private var shouldPlaySounds: Boolean = false
     private fun loadSettings(): RecognizerViewSettings {
@@ -209,9 +242,18 @@ private class VoiceInputActionWindow(
         //yield()
         recognizerView.reset()
         VoiceTiming.mark("reset done")
+        recognizerView.setHeld(fingerHeld || externalHold)
 
         //yield()
         recognizerView.start()
+
+        if (finishAfterStart) {
+            finishAfterStart = false
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                recognizerView.setHeld(fingerHeld)
+                recognizerView.finish()
+            }
+        }
     }
 
     private var inputTransaction = manager.createInputTransaction()
@@ -243,7 +285,7 @@ private class VoiceInputActionWindow(
             .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    recognizerView.value?.setHeld(true)
+                    setFingerHeld(true)
                     val releasedAsTap = withTimeoutOrNull(HOLD_MS) {
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -253,7 +295,7 @@ private class VoiceInputActionWindow(
 
                     if (releasedAsTap) {
                         lastPressWasHold = false
-                        recognizerView.value?.setHeld(false)
+                        setFingerHeld(false)
                     } else {
                         // Still down after HOLD_MS: this is a hold. Buzz like a keypress so you
                         // know auto-stop is suspended, then finish as soon as the finger lifts.
@@ -262,7 +304,7 @@ private class VoiceInputActionWindow(
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                         } while (event.changes.fastAny { it.pressed })
-                        recognizerView.value?.setHeld(false)
+                        setFingerHeld(false)
                         recognizerView.value?.finish()
                     }
                 }

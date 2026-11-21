@@ -804,10 +804,12 @@ class LatinIME : InputMethodServiceCompose(), LatinIMELegacy.SuggestionStripCont
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP && uixManager.onVolumeUpDown(event)) return true // Personal fork
         return latinIMELegacy.onKeyDown(keyCode, event) || super.onKeyDown(keyCode, event)
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP && uixManager.onVolumeUpUp()) return true // Personal fork
         return latinIMELegacy.onKeyUp(keyCode, event) || super.onKeyUp(keyCode, event)
     }
 

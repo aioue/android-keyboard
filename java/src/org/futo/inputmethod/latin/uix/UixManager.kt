@@ -680,6 +680,57 @@ class UixManager(private val latinIME: LatinIME) {
         action.altPressImpl?.invoke(keyboardManagerForAction, persistentStates[action])
     }
 
+    // ---- Personal fork: hold volume up to dictate ----
+    // Down starts voice input (and suspends silence auto-stop); up finishes it. A short tap is not
+    // a dictation: the voice panel we just opened is cancelled and the volume is raised as normal.
+    private var volHoldActive = false
+    private var volHoldStart = 0L
+    private var volOpenedWindow = false
+    private val volHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val VOL_HOLD_MS = 350L
+    private val volHapticRunnable = Runnable {
+        latinIME.window.window?.decorView?.let {
+            keyboardManagerForAction.performHapticAndAudioFeedback(Constants.CODE_TAB, it)
+        }
+    }
+
+    fun onVolumeUpDown(event: KeyEvent?): Boolean {
+        if (volHoldActive) return true // swallow key repeats while held
+        if (event?.repeatCount != 0) return false
+        if (!latinIME.isInputViewShown) return false
+        if (!latinIME.getSettingBlocking(VOLUME_UP_VOICE)) return false
+        if (latinIME.getSettingBlocking(USE_SYSTEM_VOICE_INPUT)) return false
+        val openAction = currWindowAction.value
+        if (openAction != null && openAction != org.futo.inputmethod.latin.uix.actions.VoiceInputAction) return false
+
+        volHoldActive = true
+        volHoldStart = android.os.SystemClock.uptimeMillis()
+        volOpenedWindow = openAction == null
+        if (volOpenedWindow) onActionActivatedInternal(org.futo.inputmethod.latin.uix.actions.VoiceInputAction, skipOverride = true)
+        (currWindowActionWindow.value as? org.futo.inputmethod.latin.uix.actions.HoldToTalkWindow)?.beginExternalHold()
+        volHandler.postDelayed(volHapticRunnable, VOL_HOLD_MS)
+        return true
+    }
+
+    fun onVolumeUpUp(): Boolean {
+        if (!volHoldActive) return false
+        volHoldActive = false
+        volHandler.removeCallbacks(volHapticRunnable)
+        val heldMs = android.os.SystemClock.uptimeMillis() - volHoldStart
+        val window = currWindowActionWindow.value as? org.futo.inputmethod.latin.uix.actions.HoldToTalkWindow
+        if (heldMs < VOL_HOLD_MS) {
+            if (volOpenedWindow) closeActionWindow()
+            (latinIME.getSystemService(android.media.AudioManager::class.java))?.adjustSuggestedStreamVolume(
+                android.media.AudioManager.ADJUST_RAISE,
+                android.media.AudioManager.USE_DEFAULT_STREAM_TYPE,
+                android.media.AudioManager.FLAG_SHOW_UI
+            )
+        } else {
+            window?.endExternalHold()
+        }
+        return true
+    }
+
     fun onActionActivated(rawAction: Action) {
         if (rawAction == org.futo.inputmethod.latin.uix.actions.VoiceInputAction) org.futo.voiceinput.shared.VoiceTiming.start("mic tapped")
         val event = Event.createSoftwareKeypressEvent(Constants.NOT_A_CODE, rawAction.keyCode, 0, 0, false)

@@ -56,6 +56,12 @@ val CHUNK_LONG_RECORDINGS = SettingsKey(
     default = true
 )
 
+// Personal fork: hold the volume up button (keyboard shown) to dictate; release to finish.
+val VOLUME_UP_VOICE = SettingsKey(
+    key = booleanPreferencesKey("volume_up_voice"),
+    default = true
+)
+
 val USE_VAD_AUTOSTOP = SettingsKey(
     key = booleanPreferencesKey("use_vad_autostop"),
     default = true
