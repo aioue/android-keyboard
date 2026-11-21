@@ -747,11 +747,17 @@ class UixManager(private val latinIME: LatinIME) {
         return true
     }
 
-    // T3 Code's reply box treats plain Enter as a newline and sends on Ctrl+Enter (its green send
-    // button). Other apps get the keyboard's normal Enter, which runs the field's Send/Search/Go action.
+    // T3 Code's reply box has no submit key at all: only its send button sends, so tap it through the
+    // accessibility service (DiagSubmitService). Other apps get the keyboard's normal Enter, which
+    // runs the field's Send/Search/Go action.
     private fun sendSubmitEnter() {
-        if (latinIME.currentInputEditorInfo?.packageName == "com.t3tools.t3code") {
-            keyboardManagerForAction.sendKeyEvent(android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.META_CTRL_ON)
+        if (latinIME.currentInputEditorInfo?.packageName == org.futo.inputmethod.latin.diag.DiagSubmitService.T3_PACKAGE) {
+            val service = org.futo.inputmethod.latin.diag.DiagSubmitService.instance
+            if (service == null) {
+                android.util.Log.w("DiagSubmit", "accessibility service not enabled; nothing sent")
+            } else {
+                service.clickSend()
+            }
         } else {
             keyboardManagerForAction.sendCodePointEvent(Constants.CODE_ENTER)
         }

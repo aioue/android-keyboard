@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Personal fork. Restricted to T3 Code: the service only reads that app's window to find its send
+     button (Send / Queue / Steer / Restart) and clicks it. It listens to no events. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:packageNames="com.t3tools.t3code"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="500"
+    android:description="@string/diag_submit_service_description" />
