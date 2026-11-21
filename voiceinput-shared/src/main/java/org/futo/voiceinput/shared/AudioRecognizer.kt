@@ -108,6 +108,10 @@ class AudioRecognizer(
     private val useVAD = settings.recordingConfiguration.useVADAutoStop
 
     private var floatSamples: FloatBuffer = FloatBuffer.allocate(16000 * 30)
+
+    // Number of VAD frames (30 ms each) classified as speech so far in this recording. Like
+    // floatSamples it is not reset when setBluetooth restarts the recorder.
+    @Volatile private var speechFrames = 0
     private var recorderJob: Job? = null
     private var modelJob: Job? = null
     private var loadModelJob: Job? = null
@@ -360,6 +364,7 @@ class AudioRecognizer(
                         } else {
                             numConsecutiveNonSpeech = 0
                             numConsecutiveSpeech++
+                            speechFrames++
                         }
                     }
 
@@ -551,7 +556,13 @@ class AudioRecognizer(
         val floatArray = floatSamples.array().sliceArray(0 until floatSamples.position())
 
         yield()
-        val outputText = try {
+        // With VAD on, a recording in which the VAD heard no speech at all is not sent to the model:
+        // Whisper returns made-up text for it (for example "Thanks for watching!"). The VAD is
+        // the same one that stops the recording after silence. Wait for the recording loop to finish
+        // first, so frames it is still processing are counted before the decision.
+        recorderJob?.join()
+        val noSpeech = useVAD && speechFrames == 0
+        val outputText = if (noSpeech) "" else try {
              modelRunner.run(
                 floatArray,
                 settings.modelRunConfiguration,
