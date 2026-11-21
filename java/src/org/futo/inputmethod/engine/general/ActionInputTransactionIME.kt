@@ -94,10 +94,17 @@ class ActionInputTransactionIME(val helper: IMEHelper) : IMEInterface, ActionInp
         if (isFinished) return
         helper.requestCursorUpdate()
         isFinished = true
-        ic?.commitText(
-            text,
-            1
-        )
+        // Personal fork: an empty result with nothing of ours composing doesn't touch the field.
+        // A silent tap was seen deleting the previous dictation; the cause was not reproduced. The
+        // hypothesis is that commitText("") replaced a composing span the app still held over the
+        // earlier text. Skipping the call is harmless either way: with no partial text this
+        // transaction never set a composing region.
+        if (text.isNotEmpty() || partialText.isNotEmpty()) {
+            ic?.commitText(
+                text,
+                1
+            )
+        }
         helper.endInputTransaction(this)
         (ic as? InputConnectionInternalComposingWrapper)?.send()
     }
