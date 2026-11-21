@@ -232,8 +232,16 @@ class AudioRecognizer(
     private val CHUNK_PAUSE_FRAMES = 23             // VAD frames are 30 ms: about 0.7 s of silence
     private val CHUNK_PAUSE_FRAMES_SHORT = 13       // about 0.4 s
     private val CHUNK_MIN_SPEECH_FRAMES = 20        // a chunk must contain at least ~0.6 s of speech
-    private val TOO_SHORT_SAMPLES = 16000 * 4 / 10  // under 0.4 s in total: nothing worth transcribing
+    // Under this many samples in total there is nothing worth transcribing. 0.2 s relies on the VAD
+    // speech count (noSpeech, below) to catch silence above it, so without VAD keep the old 0.4 s.
+    private val TOO_SHORT_SAMPLES get() = if (useVAD) 16000 * 2 / 10 else 16000 * 4 / 10
+    // whisper.cpp refuses input under 100 mel frames, and n_len_org = 1 + (n - 200) / 160 gives only
+    // 99 for exactly 16000 samples, so pad to 1.1 s.
+    private val MIN_MODEL_SAMPLES = 16000 * 11 / 10
     private val TAIL_MIN_SPEECH_FRAMES = 5          // skip a final pass that is only silence
+    // A whole clip needs at least this many VAD speech frames (30 ms each) to be transcribed. Taps
+    // with no speech counted 0 and a quick "one" counted 4-6 in testing, so 3 sits between them.
+    private val CLIP_MIN_SPEECH_FRAMES = 3
 
     private var chunkStart = 0                      // first sample not yet handed to a chunk
     @Volatile private var speechFramesSinceCut = 0
@@ -656,10 +664,21 @@ class AudioRecognizer(
         // a fraction of a second of near-silence it just repeats that text back, so the previous
         // dictation was typed twice. Skip the model run instead.
         val tooShort = !chunksOk && (end - startIdx) < TOO_SHORT_SAMPLES
-        val skipTail = tooShort || (chunksOk && speechFramesSinceCut < TAIL_MIN_SPEECH_FRAMES)
-        VoiceTiming.mark("final pass: ${(end - startIdx) / 16000}s of audio, ${chunkTexts.size} earlier chunks, ${if (skipTail) "tail skipped" else "tail run"}")
+        // Short clips are padded with silence for whisper.cpp (below), and given mostly silence the
+        // model invents text. With no chunk cut so far, speechFramesSinceCut counts the whole clip;
+        // after a cut it only counts the audio since, so a failed chunk run (chunksOk false, whole
+        // clip re-transcribed) must not be judged by it.
+        val noSpeech = chunkTexts.isEmpty() && useVAD && speechFramesSinceCut < CLIP_MIN_SPEECH_FRAMES
+        val skipTail = tooShort || noSpeech || (chunksOk && speechFramesSinceCut < TAIL_MIN_SPEECH_FRAMES)
+        VoiceTiming.mark("final pass: ${end - startIdx} samples, ${chunkTexts.size} earlier chunks, speechFrames=$speechFramesSinceCut, tooShort=$tooShort noSpeech=$noSpeech, ${if (skipTail) "tail skipped" else "tail run"}")
 
-        val floatArray = floatSamples.array().copyOfRange(startIdx, end)
+        // whisper.cpp returns nothing for input under 1.0 s (see the "less than 1.0s" check in
+        // whisper_full_with_state), so a quick word was silently dropped. Pad with explicit
+        // silence up to MIN_MODEL_SAMPLES; the TOO_SHORT_SAMPLES check above already keeps near-empty
+        // recordings from reaching the model. The buffer beyond `end` can hold older audio, so
+        // don't rely on copyOfRange growing the array.
+        val speech = floatSamples.array().copyOfRange(startIdx, end)
+        val floatArray = if (speech.size < MIN_MODEL_SAMPLES) speech.copyOf(MIN_MODEL_SAMPLES) else speech
 
         val callback = if (prefix.isEmpty()) runnerCallback else object : ModelInferenceCallback {
             override fun updateStatus(state: InferenceState) = runnerCallback.updateStatus(state)
