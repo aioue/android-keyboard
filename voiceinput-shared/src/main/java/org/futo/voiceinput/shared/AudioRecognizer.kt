@@ -726,7 +726,7 @@ class AudioRecognizer(
         }
         val outputText = listOf(prefix, tailText).filter { it.isNotBlank() }.joinToString(" ")
 
-        VoiceTiming.mark("transcription done")
+        VoiceTiming.mark("transcription done: ${outputText.trim().split(Regex("\\s+")).count { it.isNotEmpty() }} words")
         val text = when {
             isBlankResult(outputText) -> ""
             else -> outputText
