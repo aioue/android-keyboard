@@ -233,6 +233,7 @@ class AudioRecognizer(
     private val CHUNK_PAUSE_FRAMES = 23             // VAD frames are 30 ms: about 0.7 s of silence
     private val CHUNK_PAUSE_FRAMES_SHORT = 13       // about 0.4 s
     private val CHUNK_MIN_SPEECH_FRAMES = 20        // a chunk must contain at least ~0.6 s of speech
+    private val TOO_SHORT_SAMPLES = 16000 * 4 / 10  // under 0.4 s in total: nothing worth transcribing
     private val TAIL_MIN_SPEECH_FRAMES = 5          // skip a final pass that is only silence
 
     private var chunkStart = 0                      // first sample not yet handed to a chunk
@@ -657,7 +658,12 @@ class AudioRecognizer(
         val chunksOk = chunkTexts.isNotEmpty() && !chunkFailed
         val startIdx = if (chunksOk) chunkStart else 0
         val prefix = if (chunksOk) synchronized(chunkTexts) { chunkTexts.filter { it.isNotBlank() }.joinToString(" ") } else ""
-        val skipTail = chunksOk && speechFramesSinceCut < TAIL_MIN_SPEECH_FRAMES
+        // A recording shorter than this is a mis-press (e.g. a volume-button tap right after a
+        // dictation), not speech. Whisper is conditioned on the text already in the field, and given
+        // a fraction of a second of near-silence it just repeats that text back, so the previous
+        // dictation was typed twice. Skip the model run instead.
+        val tooShort = !chunksOk && (end - startIdx) < TOO_SHORT_SAMPLES
+        val skipTail = tooShort || (chunksOk && speechFramesSinceCut < TAIL_MIN_SPEECH_FRAMES)
         VoiceTiming.mark("final pass: ${(end - startIdx) / 16000}s of audio, ${chunkTexts.size} earlier chunks, ${if (skipTail) "tail skipped" else "tail run"}")
 
         val floatArray = floatSamples.array().copyOfRange(startIdx, end)
