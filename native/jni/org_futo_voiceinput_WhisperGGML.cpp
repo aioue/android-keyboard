@@ -99,6 +99,10 @@ static jstring WhisperGGML_infer(JNIEnv *env, jobject instance, jlong handle, jf
     // repeated until the limit), and the full 256 decode steps took about 3 s. num_samples is the
     // padded length (at least 1.1 s), so this means a real clip under 2 s. max_tokens counts decode
     // steps only, not the prompt. 32 is ample for English at that length; for CJK it is a guess.
+    // 32 is also the lowest cap that keeps whisper.cpp's own repetition check working (from source,
+    // not measured): a beam stopped by the cap has result_len 33, and whisper_full_with_state drops
+    // beams with result_len > 32 whose last 32 tokens have entropy under entropy_thold, so a beam
+    // that ended with EOT wins. Only if every beam loops is the loop returned.
     wparams.max_tokens = num_samples < 16000 * 2 ? 32 : 256;
     wparams.n_threads = (int)num_procs;
 

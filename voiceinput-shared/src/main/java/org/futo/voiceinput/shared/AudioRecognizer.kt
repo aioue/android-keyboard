@@ -725,10 +725,14 @@ class AudioRecognizer(
         }
     }
 
-    // A very short clip padded with silence can send Whisper into a repetition loop (a quick "one"
+    // A very short clip can send Whisper into a repetition loop (before the 32-step cap a quick "one"
     // came back as dozens of "1"). Collapse runs of 3 or more of the same word to one. A run of 2 is
     // kept, but "no no no" in a clip this short becomes "no". Only splits on whitespace, so it does
     // nothing for languages written without spaces; the token cap bounds those.
+    // This is a text heuristic, not a fix. From whisper.cpp source, with the cap a looping beam is
+    // discarded when another beam ended on its own (see WhisperGGML.cpp), so a loop should only get
+    // here when every beam looped. Whether that still happens is not measured: the mark below logs
+    // each time this changes a result. If it never fires, remove it.
     private fun sameWord(a: String, b: String) =
         a.trim { !it.isLetterOrDigit() }.equals(b.trim { !it.isLetterOrDigit() }, ignoreCase = true)
 
@@ -742,6 +746,8 @@ class AudioRecognizer(
             repeat(if (j - i >= 3) 1 else j - i) { out.add(words[i]) }
             i = j
         }
+        if (out.size == words.size) return text
+        VoiceTiming.mark("collapsed repeats: ${words.size} -> ${out.size} words")
         return out.joinToString(" ")
     }
 
