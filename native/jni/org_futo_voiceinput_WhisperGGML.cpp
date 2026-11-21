@@ -95,7 +95,11 @@ static jstring WhisperGGML_infer(JNIEnv *env, jobject instance, jlong handle, jf
     wparams.print_realtime = false;
     wparams.print_special = false;
     wparams.print_timestamps = false;
-    wparams.max_tokens = 256;
+    // Personal fork: Whisper can loop on a very short clip padded with silence (a quick "one"
+    // repeated until the limit), and the full 256 decode steps took about 3 s. num_samples is the
+    // padded length (at least 1.1 s), so this means a real clip under 2 s. max_tokens counts decode
+    // steps only, not the prompt. 32 is ample for English at that length; for CJK it is a guess.
+    wparams.max_tokens = num_samples < 16000 * 2 ? 32 : 256;
     wparams.n_threads = (int)num_procs;
 
     wparams.audio_ctx = std::max(160, std::min(1500, (int)ceil((double)num_samples / (double)(320.0)) + 32));

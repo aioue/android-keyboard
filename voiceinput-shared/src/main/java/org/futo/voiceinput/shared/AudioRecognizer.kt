@@ -238,6 +238,11 @@ class AudioRecognizer(
     // whisper.cpp refuses input under 100 mel frames, and n_len_org = 1 + (n - 200) / 160 gives only
     // 99 for exactly 16000 samples, so pad to 1.1 s.
     private val MIN_MODEL_SAMPLES = 16000 * 11 / 10
+    // Clips under 2 s: the decoder is capped at 32 tokens for them in WhisperGGML.cpp (same limit),
+    // and repeated words in their results are collapsed (see runModel).
+    private val SHORT_CLIP_SAMPLES = 16000 * 2
+    // Streaming partial text saves little time on short speech, so only clips of 4 s or more stream.
+    private val STREAM_PARTIALS_SAMPLES = 16000 * 4
     private val TAIL_MIN_SPEECH_FRAMES = 5          // skip a final pass that is only silence
     // A whole clip needs at least this many VAD speech frames (30 ms each) to be transcribed. Taps
     // with no speech counted 0 and a quick "one" counted 4-6 in testing, so 3 sits between them.
@@ -680,7 +685,15 @@ class AudioRecognizer(
         val speech = floatSamples.array().copyOfRange(startIdx, end)
         val floatArray = if (speech.size < MIN_MODEL_SAMPLES) speech.copyOf(MIN_MODEL_SAMPLES) else speech
 
-        val callback = if (prefix.isEmpty()) runnerCallback else object : ModelInferenceCallback {
+        val isShortClip = speech.size < SHORT_CLIP_SAMPLES
+        val callback = if (speech.size < STREAM_PARTIALS_SAMPLES && prefix.isEmpty()) object : ModelInferenceCallback {
+            // A clip this short is transcribed in about a second, and a repetition loop would be
+            // typed into the field as composing text before being cleaned up, so only the final
+            // result is shown.
+            override fun updateStatus(state: InferenceState) = runnerCallback.updateStatus(state)
+            override fun languageDetected(language: Language) = runnerCallback.languageDetected(language)
+            override fun partialResult(string: String) {}
+        } else if (prefix.isEmpty()) runnerCallback else object : ModelInferenceCallback {
             override fun updateStatus(state: InferenceState) = runnerCallback.updateStatus(state)
             override fun languageDetected(language: Language) = runnerCallback.languageDetected(language)
             override fun partialResult(string: String) = runnerCallback.partialResult("$prefix $string")
@@ -694,6 +707,7 @@ class AudioRecognizer(
                 settings.decodingConfiguration.copy(previousText = tailOf(prefix)),
                 callback
             ).trim().let { if (isBlankResult(it)) "" else it }
+                .let { if (isShortClip) collapseRepeats(it) else it }
         }catch(e: InferenceCancelledException) {
             yield()
             return
@@ -713,6 +727,26 @@ class AudioRecognizer(
                 listener.finished(text)
             }
         }
+    }
+
+    // A very short clip padded with silence can send Whisper into a repetition loop (a quick "one"
+    // came back as dozens of "1"). Collapse runs of 3 or more of the same word to one. A run of 2 is
+    // kept, but "no no no" in a clip this short becomes "no". Only splits on whitespace, so it does
+    // nothing for languages written without spaces; the token cap bounds those.
+    private fun sameWord(a: String, b: String) =
+        a.trim { !it.isLetterOrDigit() }.equals(b.trim { !it.isLetterOrDigit() }, ignoreCase = true)
+
+    private fun collapseRepeats(text: String): String {
+        val words = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val out = mutableListOf<String>()
+        var i = 0
+        while (i < words.size) {
+            var j = i
+            while (j < words.size && sameWord(words[j], words[i])) j++
+            repeat(if (j - i >= 3) 1 else j - i) { out.add(words[i]) }
+            i = j
+        }
+        return out.joinToString(" ")
     }
 
     private fun onFinishRecording() {
