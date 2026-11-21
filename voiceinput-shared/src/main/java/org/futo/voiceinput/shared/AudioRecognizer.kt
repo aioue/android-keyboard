@@ -372,11 +372,11 @@ class AudioRecognizer(
 
 
     @Throws(SecurityException::class)
-    private fun createAudioRecorder(): AudioRecord {
+    private fun createAudioRecorder(preferBluetoothMic: Boolean): AudioRecord {
         // Personal fork: use the pre-created recorder when allowed. Not with a Bluetooth mic, since
         // the communication device is chosen before the recorder is created in that case.
         val warm = if (settings.recordingConfiguration.usePrewarmedRecorder &&
-            !settings.recordingConfiguration.preferBluetoothMic) RecorderPrewarm.take() else null
+            !preferBluetoothMic) RecorderPrewarm.take() else null
         val recorder = warm ?: RecorderPrewarm.create()
 
         this.recorder = recorder
@@ -554,7 +554,7 @@ class AudioRecognizer(
         val task = {
             recorder?.release()
 
-            val recorder = createAudioRecorder()
+            val recorder = createAudioRecorder(preferBluetoothMic)
             VoiceTiming.mark("AudioRecord created")
 
             recorder.startRecording()
