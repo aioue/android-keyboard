@@ -243,12 +243,19 @@ class AudioRecognizer(
     private val SHORT_CLIP_SAMPLES = 16000 * 2
     private val TAIL_MIN_SPEECH_FRAMES = 5          // skip a final pass that is only silence
     // With VAD on, a clip is transcribed only if VAD counted at least this many speech frames (30 ms
-    // each) in it. Measured on a Pixel 8a: silent taps 0, spoken clips 3-24. Without VAD there is no
-    // such count, so short clips are not padded, as before.
-    private val CLIP_MIN_SPEECH_FRAMES = 3
+    // each) in it, not counting the first VAD_START_IGNORE_FRAMES. Measured on a Pixel 8a: silent taps
+    // 0 (built-in mic) or 0-3 (earbuds, after ignoring the start-up burst), spoken clips 3-24, all but
+    // one 4 or more. Without VAD there is no such count, so short clips are not padded, as before.
+    private val CLIP_MIN_SPEECH_FRAMES = 4
+    private val VAD_START_IGNORE_FRAMES = 5         // about 150 ms; speech can't start sooner after the tap
 
     private var chunkStart = 0                      // first sample not yet handed to a chunk
     @Volatile private var speechFramesSinceCut = 0
+    // VAD frames seen so far (30 ms each); never reset. Also logged, with the next two, in the
+    // final-pass mark to show where in the clip the speech frames fall.
+    @Volatile private var diagVadFrames = 0
+    @Volatile private var diagFirstSpeechFrame = -1
+    @Volatile private var diagMaxSpeechRun = 0
     private val chunkTexts = java.util.Collections.synchronizedList(mutableListOf<String>())
     private var chunkChain: Job? = null
     @Volatile private var chunkFailed = false
@@ -446,6 +453,7 @@ class AudioRecognizer(
                         val isSpeech = vad.isSpeech(vadSampleBuffer.array())
                         vadSampleBuffer.clear()
                         vadSampleBuffer.rewind()
+                        diagVadFrames++
 
                         if (!isSpeech) {
                             numConsecutiveNonSpeech++
@@ -453,7 +461,12 @@ class AudioRecognizer(
                         } else {
                             numConsecutiveNonSpeech = 0
                             numConsecutiveSpeech++
-                            speechFramesSinceCut++
+                            // The first VAD frames are not counted: on a Bluetooth (SCO) mic the link
+                            // starting up gives a burst of exactly 3 speech frames at frame 1, with
+                            // no speech (11 of 22 silent taps; 0 frames on the built-in mic).
+                            if (diagVadFrames > VAD_START_IGNORE_FRAMES) speechFramesSinceCut++
+                            if (diagFirstSpeechFrame < 0) diagFirstSpeechFrame = diagVadFrames
+                            if (numConsecutiveSpeech > diagMaxSpeechRun) diagMaxSpeechRun = numConsecutiveSpeech
                         }
                     }
 
@@ -678,7 +691,7 @@ class AudioRecognizer(
         val noSpeech = chunkTexts.isEmpty() &&
             (if (useVAD) speechFramesSinceCut < CLIP_MIN_SPEECH_FRAMES else tooShortForModel)
         val skipTail = noSpeech || (chunksOk && speechFramesSinceCut < TAIL_MIN_SPEECH_FRAMES)
-        VoiceTiming.mark("final pass: ${end - startIdx} samples, ${chunkTexts.size} earlier chunks, speechFrames=$speechFramesSinceCut, noSpeech=$noSpeech, ${if (skipTail) "tail skipped" else "tail run"}")
+        VoiceTiming.mark("final pass: ${end - startIdx} samples, ${chunkTexts.size} earlier chunks, speechFrames=$speechFramesSinceCut, vadFrames=$diagVadFrames, firstSpeech=$diagFirstSpeechFrame, maxRun=$diagMaxSpeechRun, noSpeech=$noSpeech, ${if (skipTail) "tail skipped" else "tail run"}")
 
         // Pad with explicit silence: the buffer beyond `end` can hold older audio, so don't rely on
         // copyOfRange growing the array.
