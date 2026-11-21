@@ -704,6 +704,7 @@ class UixManager(private val latinIME: LatinIME) {
         if (openAction != null && openAction != org.futo.inputmethod.latin.uix.actions.VoiceInputAction) return false
 
         volHoldActive = true
+        volSubmitUsed = false
         volHoldStart = android.os.SystemClock.uptimeMillis()
         volOpenedWindow = openAction == null
         if (volOpenedWindow) onActionActivatedInternal(org.futo.inputmethod.latin.uix.actions.VoiceInputAction, skipOverride = true)
@@ -712,10 +713,49 @@ class UixManager(private val latinIME: LatinIME) {
         return true
     }
 
+    // Volume down while volume up is held: finish the dictation now, then press Enter (the
+    // keyboard's own Enter, so editor actions like Send/Search/Go run) once the transcript has been
+    // committed. The submit fires from closeActionWindow, which the voice window calls after commit.
+    private var volSubmitPending = false
+    private var volDownSwallowed = false
+    private var volSubmitUsed = false // volume down was pressed during this volume-up hold
+    private val volSubmitTimeout = Runnable { volSubmitPending = false } // recogniser never closed
+
+    fun onVolumeDownDown(event: KeyEvent?): Boolean {
+        if (!volHoldActive) return false
+        volSubmitUsed = true
+        volDownSwallowed = true // also swallows the matching key-up and any repeats
+        if (event?.repeatCount != 0 || volSubmitPending) return true
+        volHandler.removeCallbacks(volHapticRunnable)
+        latinIME.window.window?.decorView?.let {
+            keyboardManagerForAction.performHapticAndAudioFeedback(Constants.CODE_ENTER, it)
+        }
+        val window = currWindowActionWindow.value as? org.futo.inputmethod.latin.uix.actions.HoldToTalkWindow
+        if (window == null) {
+            volHandler.post { sendSubmitEnter() }
+        } else {
+            volSubmitPending = true
+            volHandler.postDelayed(volSubmitTimeout, 20_000L)
+            window.endExternalHold()
+        }
+        return true
+    }
+
+    fun onVolumeDownUp(): Boolean {
+        if (!volDownSwallowed) return false
+        volDownSwallowed = false
+        return true
+    }
+
+    private fun sendSubmitEnter() {
+        keyboardManagerForAction.sendCodePointEvent(Constants.CODE_ENTER)
+    }
+
     fun onVolumeUpUp(): Boolean {
         if (!volHoldActive) return false
         volHoldActive = false
         volHandler.removeCallbacks(volHapticRunnable)
+        if (volSubmitUsed) return true // dictation was already finished by volume down
         val heldMs = android.os.SystemClock.uptimeMillis() - volHoldStart
         val window = currWindowActionWindow.value as? org.futo.inputmethod.latin.uix.actions.HoldToTalkWindow
         if (heldMs < VOL_HOLD_MS) {
@@ -1513,6 +1553,13 @@ class UixManager(private val latinIME: LatinIME) {
         // Reset any typeface override as they're not supposed to persist outside of an active
         // action window
         keyboardManagerForAction.overrideKeyboardTypeface(null)
+
+        // Personal fork: volume-down submit waits for the voice window to commit and close.
+        if (volSubmitPending) {
+            volSubmitPending = false
+            volHandler.removeCallbacks(volSubmitTimeout)
+            volHandler.post { sendSubmitEnter() }
+        }
     }
 
 
