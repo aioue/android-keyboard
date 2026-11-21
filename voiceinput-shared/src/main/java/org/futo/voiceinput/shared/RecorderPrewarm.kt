@@ -23,7 +23,11 @@ object RecorderPrewarm {
     private const val IDLE_RELEASE_MS = 90_000L
     private val handler = Handler(Looper.getMainLooper())
     private var warm: AudioRecord? = null
-    private val releaseRunnable = Runnable { release() }
+    private val releaseRunnable = Runnable { dropWarm() }
+
+    // True from onKeyboardShown() until release() (keyboard hidden). A recorder built while the
+    // keyboard hides is released instead of installed, so none is held while hidden.
+    private var shown = false
 
     // Same parameters as AudioRecognizer's own recorder, so the two are interchangeable.
     fun create(): AudioRecord {
@@ -40,22 +44,36 @@ object RecorderPrewarm {
         return recorder
     }
 
-    /** Call from a background thread. Does nothing without mic permission or if already warm. */
+    @Synchronized
+    fun onKeyboardShown() { shown = true }
+
+    /**
+     * Call from a background thread. Does nothing without mic permission, while hidden, or if
+     * already warm. The recorder is built outside the lock: building takes 45-105 ms, and release()
+     * runs on the main thread when the keyboard hides (measured waits of up to 84 ms when it had to
+     * wait for a build under the lock).
+     */
     fun prewarm(context: Context) {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
         synchronized(this) {
-            if (warm == null) {
-                warm = try {
-                    create().let { r ->
-                        if (r.state == AudioRecord.STATE_INITIALIZED) r else { r.release(); return }
-                    }
-                } catch (e: Exception) {
-                    null
-                }
-            }
-            handler.removeCallbacks(releaseRunnable)
-            handler.postDelayed(releaseRunnable, IDLE_RELEASE_MS)
+            if (!shown) return
+            if (warm != null) { rescheduleIdleRelease(); return }
         }
+        val r = try {
+            create().let { if (it.state == AudioRecord.STATE_INITIALIZED) it else { it.release(); null } }
+        } catch (e: Exception) {
+            null
+        } ?: return
+        synchronized(this) {
+            if (!shown || warm != null) { r.release(); return }
+            warm = r
+            rescheduleIdleRelease()
+        }
+    }
+
+    private fun rescheduleIdleRelease() {
+        handler.removeCallbacks(releaseRunnable)
+        handler.postDelayed(releaseRunnable, IDLE_RELEASE_MS)
     }
 
     /** Hands over the warm recorder, if any. The caller owns it (and must release it) from here. */
@@ -68,8 +86,15 @@ object RecorderPrewarm {
         return r
     }
 
+    /** The keyboard hid: drop the recorder and refuse a prewarm that is still being built. */
     @Synchronized
     fun release() {
+        shown = false
+        dropWarm()
+    }
+
+    @Synchronized
+    private fun dropWarm() {
         handler.removeCallbacks(releaseRunnable)
         warm?.release()
         warm = null
