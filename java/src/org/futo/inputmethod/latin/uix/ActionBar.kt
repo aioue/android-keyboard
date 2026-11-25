@@ -121,6 +121,8 @@ import org.futo.inputmethod.latin.SuggestionBlacklist
 import org.futo.inputmethod.latin.common.Constants
 import org.futo.inputmethod.latin.suggestions.SuggestionStripViewListener
 import org.futo.inputmethod.latin.uix.actions.FavoriteActions
+import org.futo.inputmethod.latin.uix.actions.forkActionTint
+import org.futo.inputmethod.latin.uix.actions.migrateAutofillReportFavorite
 import org.futo.inputmethod.latin.uix.actions.MoreActionsAction
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -553,7 +555,8 @@ fun LazyItemScope.ActionItem(idx: Int, action: Action, onSelect: (Action) -> Uni
         .width(width)
         .fillMaxHeight()
 
-    val contentCol = LocalKeyboardScheme.current.onBackground
+    // Fork buttons are yellow because this item draws no circle behind the icon.
+    val contentCol = forkActionTint(action) ?: LocalKeyboardScheme.current.onBackground
 
     Box(modifier = modifier
         .clip(CircleShape)
@@ -573,7 +576,7 @@ fun LazyItemScope.ActionItem(idx: Int, action: Action, onSelect: (Action) -> Uni
 @Composable
 fun ActionItemSmall(action: Action, onSelect: (Action) -> Unit, onLongSelect: (Action) -> Unit, tintOverride: Color? = null) {
     val bgCol = LocalKeyboardScheme.current.keyboardContainer
-    val fgCol = tintOverride ?: LocalKeyboardScheme.current.onKeyboardContainer
+    val fgCol = tintOverride ?: forkActionTint(action) ?: LocalKeyboardScheme.current.onKeyboardContainer
 
     val circleRadius = with(LocalDensity.current) {
         16.dp.toPx()
@@ -626,6 +629,13 @@ fun ActionItems(onSelect: (Action) -> Unit, onLongSelect: (Action) -> Unit) {
     val scrollItemOffset = if(LocalInspectionMode.current) { 0 } else {
         remember {
             context.getSettingBlocking(ActionBarScrollOffsetSetting)
+        }
+    }
+
+    // Existing installs: put the autofill report button in the toolbar once (see migrateAutofillReportFavorite).
+    if(!LocalInspectionMode.current) {
+        LaunchedEffect(Unit) {
+            withContext(Dispatchers.Default) { context.migrateAutofillReportFavorite() }
         }
     }
 

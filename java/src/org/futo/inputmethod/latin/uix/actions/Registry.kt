@@ -47,6 +47,7 @@ val AllActionsMap = mapOf(
     "diag_view" to DiagViewAction,
     "diag_export" to DiagExportAction,
     "diag_clear" to DiagClearAction,
+    "autofill_report" to AutofillReportAction,
 )
 
 val ActionToId = AllActionsMap.entries.associate { it.value to it.key }

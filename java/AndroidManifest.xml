@@ -70,6 +70,19 @@
                  android:resource="@xml/diag_submit_service"/>
         </service>
 
+        <!-- Personal fork: reads the address bar of Brave/Chrome for the autofill report button.
+             Limited to those packages in url_reader_service.xml; off until enabled in Accessibility. -->
+        <service android:name="org.futo.inputmethod.latin.diag.UrlReaderService"
+             android:label="@string/url_reader_service_label"
+             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+             android:exported="false">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService"/>
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice"
+                 android:resource="@xml/url_reader_service"/>
+        </service>
+
         <!--
         <service android:name=".spellcheck.AndroidSpellCheckerService"
              android:label="@string/spell_checker_service_name"
@@ -248,6 +261,14 @@
     <queries>
         <intent>
             <action android:name="android.view.InputMethod" />
+        </intent>
+        <!-- Fork: the autofill report button reads Bitwarden's version and the focused browser's
+             version so the Bitwarden report form can be prefilled. -->
+        <package android:name="com.x8bit.bitwarden" />
+        <package android:name="com.x8bit.bitwarden.beta" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
         </intent>
     </queries>
 </manifest>

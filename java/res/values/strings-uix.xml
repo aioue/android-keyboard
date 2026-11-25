@@ -23,6 +23,7 @@
     <string name="action_diag_view_title">View diagnostic log</string>
     <string name="action_diag_export_title">Export diagnostic log</string>
     <string name="action_diag_clear_title">Clear diagnostic log</string>
+    <string name="action_autofill_report_title">Report autofill failure</string>
 
     <!-- For emoji menu action -->
     <string name="action_emoji_title">Emojis</string>
@@ -724,6 +725,8 @@ Default is %1$s</string>
     <string name="personal_dictionary_delete_additional_file">Delete extra dictionary file?</string>
     <!-- %1$s will be replaced with the custom dictionary name -->
     <string name="personal_dictionary_delete_additional_file_text">%1$s will be deleted</string>
+    <string name="url_reader_service_label" translatable="false">FUTO diag: read browser URL</string>
+    <string name="url_reader_service_description" translatable="false">Lets the keyboard read the address bar of Brave or Chrome when you press the autofill report button, so the page can be filled into Bitwarden\'s report form. Only reads that one address bar, only on that button press.</string>
     <string name="diag_submit_service_label" translatable="false">FUTO diag: submit in T3 Code</string>
     <string name="diag_submit_service_description" translatable="false">Lets the keyboard tap T3 Code\'s send button when you press volume down while holding volume up to dictate. Only reads T3 Code\'s screen, only to find that button.</string>
     <string name="diag_log_setting_title" translatable="false">Diagnostic log (personal fork)</string>
