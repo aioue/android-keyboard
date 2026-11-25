@@ -1,6 +1,5 @@
 package org.futo.inputmethod.latin.uix.actions
 
-import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -48,14 +47,6 @@ private fun Context.packageVersion(pkg: String): String? = try {
     null
 }
 
-private fun Context.drawOverGranted(pkg: String): Boolean? = try {
-    val uid = packageManager.getApplicationInfo(pkg, 0).uid
-    val ops = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-    ops.unsafeCheckOpNoThrow("android:system_alert_window", uid, pkg) == AppOpsManager.MODE_ALLOWED
-} catch (e: Exception) {
-    null
-}
-
 private fun yesNo(v: Boolean?) = when (v) { true -> "Yes"; false -> "No"; null -> null }
 
 private fun Context.buildReportUri(editorPackage: String?): Uri {
@@ -64,27 +55,29 @@ private fun Context.buildReportUri(editorPackage: String?): Uri {
     val enabledAutofill = try {
         Settings.Secure.getString(contentResolver, "autofill_service")
     } catch (e: Exception) { null }
-    val enabledAccessibility = try {
-        Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-    } catch (e: Exception) { null }
 
     val autofillOn = bitwardenPkg?.let { enabledAutofill?.startsWith("$it/") == true }
-    val accessibilityOn = bitwardenPkg?.let { enabledAccessibility?.contains("$it/") == true }
-    val drawOver = bitwardenPkg?.let { drawOverGranted(it) }
 
     // The keyboard sees which app has the text field focused, but not the page address; that comes
-    // from UrlReaderService (an accessibility service, off until enabled). Without it the field
-    // ends with "URL: " for the user to finish.
+    // from UrlReaderService (an accessibility service, off until enabled). In a browser the
+    // "Problematic App or URL" field holds just the address, and the browser name and version go to
+    // the additional info. Without the service (or for any other app) the field holds the app's
+    // package name, with "URL: " left for the user to finish in a browser.
     val editorVersion = editorPackage?.let { packageVersion(it) }
-    val url = if (editorPackage in UrlReaderService.BROWSER_PACKAGES) UrlReaderService.instance?.currentUrl() else null
-    val appOrUrl = if (editorPackage == null) "" else buildString {
-        append(editorPackage)
-        if (editorVersion != null) append(" $editorVersion")
-        append(" - URL: ")
-        if (url != null) append(url)
+    val isBrowser = editorPackage in UrlReaderService.BROWSER_PACKAGES
+    val url = if (isBrowser) UrlReaderService.instance?.currentUrl() else null
+    val appOrUrl = when {
+        url != null -> url
+        isBrowser -> "$editorPackage - URL: "
+        else -> editorPackage ?: ""
     }
 
     val extra = buildString {
+        if (editorPackage != null) {
+            append("App: $editorPackage")
+            if (editorVersion != null) append(" $editorVersion")
+            append(". ")
+        }
         append("Keyboard: FUTO Keyboard ${BuildConfig.VERSION_NAME} (inline autofill setting ")
         append(if (getSettingBlocking(InlineAutofillSetting)) "on" else "off")
         append("). Sent from the keyboard's report button.")
@@ -99,8 +92,10 @@ private fun Context.buildReportUri(editorPackage: String?): Uri {
         // Hardcoded: Bitwarden's display mode (inline vs overlay) is not readable from outside the
         // app. Change this if the Bitwarden setting is ever switched away from "Inline".
         ENTRY_INLINE to "Yes",
-        ENTRY_ACCESSIBILITY to yesNo(accessibilityOn),
-        ENTRY_DRAW_OVER to yesNo(drawOver),
+        // Bitwarden 2026.10.1's Autofill screen has no accessibility or draw-over option, so the
+        // honest answer is N/A, not "No" (which would claim the option exists but is off).
+        ENTRY_ACCESSIBILITY to "N/A",
+        ENTRY_DRAW_OVER to "N/A",
         ENTRY_BITWARDEN_VERSION to bitwardenPkg?.let { packageVersion(it) },
         ENTRY_APP_OR_URL to appOrUrl,
         ENTRY_EXTRA to extra,
