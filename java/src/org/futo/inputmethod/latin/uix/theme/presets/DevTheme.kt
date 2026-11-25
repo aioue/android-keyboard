@@ -1,10 +1,7 @@
 package org.futo.inputmethod.latin.uix.theme.presets
 
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.tooling.preview.Preview
 import org.futo.inputmethod.latin.R
 import org.futo.inputmethod.latin.uix.extendedDarkColorScheme
@@ -45,17 +42,10 @@ private val darkScheme = extendedDarkColorScheme(
     keyboardFade1=Color(0xFF2E2E2E),
     primaryTransparent=Color(0xFFF0DFD3).copy(alpha = 0.3f),
     onSurfaceTransparent=Color(0xFFFFF0E5).copy(alpha = 0.1f),
-    keyboardBackgroundGradient=Brush.linearGradient(
-        colorStops = arrayOf(
-            0.0f to Color(0xFF3a2a15),
-            0.5f to Color(0xFF3a2a15),
-            0.5f to Color(0xFF282828),
-            1.0f to Color(0xFF282828),
-        ),
-        start = Offset(0f, 0f),
-        end = Offset(300f, 300f),
-        tileMode = TileMode.Repeated
-    )
+    // Fork: upstream paints a brown/grey diagonal hatch here (Brush.linearGradient with hard stops,
+    // tiled) so dev builds are easy to tell from release builds. Removed for this personal fork; with
+    // no gradient KeyboardBackground falls back to a solid keyboardSurface.
+    keyboardBackgroundGradient=null
 )
 
 val DevTheme = ThemeOption(
