@@ -1,5 +1,6 @@
 package org.futo.inputmethod.latin.uix.actions
 
+import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -47,6 +48,16 @@ private fun Context.packageVersion(pkg: String): String? = try {
     null
 }
 
+// Bitwarden 2026.10.1 has no draw-over toggle in its own settings, but the Android permission still
+// decides whether the overlay can be drawn, so report that.
+private fun Context.drawOverGranted(pkg: String): Boolean? = try {
+    val uid = packageManager.getApplicationInfo(pkg, 0).uid
+    val ops = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+    ops.unsafeCheckOpNoThrow("android:system_alert_window", uid, pkg) == AppOpsManager.MODE_ALLOWED
+} catch (e: Exception) {
+    null
+}
+
 private fun yesNo(v: Boolean?) = when (v) { true -> "Yes"; false -> "No"; null -> null }
 
 private fun Context.buildReportUri(editorPackage: String?): Uri {
@@ -56,7 +67,15 @@ private fun Context.buildReportUri(editorPackage: String?): Uri {
         Settings.Secure.getString(contentResolver, "autofill_service")
     } catch (e: Exception) { null }
 
+    val enabledAccessibility = try {
+        Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+    } catch (e: Exception) { null }
+
     val autofillOn = bitwardenPkg?.let { enabledAutofill?.startsWith("$it/") == true }
+    // Bitwarden still ships an accessibility service (it is just not in its Autofill screen any more),
+    // so this is Yes only if that service is switched on in Android's Accessibility settings.
+    val accessibilityOn = bitwardenPkg?.let { enabledAccessibility?.contains("$it/") == true }
+    val drawOver = bitwardenPkg?.let { drawOverGranted(it) }
 
     // The keyboard sees which app has the text field focused, but not the page address; that comes
     // from UrlReaderService (an accessibility service, off until enabled). In a browser the
@@ -76,7 +95,7 @@ private fun Context.buildReportUri(editorPackage: String?): Uri {
         if (editorPackage != null) {
             append("App: $editorPackage")
             if (editorVersion != null) append(" $editorVersion")
-            append(". ")
+            append(".\n\n")
         }
         append("Keyboard: FUTO Keyboard ${BuildConfig.VERSION_NAME} (inline autofill setting ")
         append(if (getSettingBlocking(InlineAutofillSetting)) "on" else "off")
@@ -92,10 +111,8 @@ private fun Context.buildReportUri(editorPackage: String?): Uri {
         // Hardcoded: Bitwarden's display mode (inline vs overlay) is not readable from outside the
         // app. Change this if the Bitwarden setting is ever switched away from "Inline".
         ENTRY_INLINE to "Yes",
-        // Bitwarden 2026.10.1's Autofill screen has no accessibility or draw-over option, so the
-        // honest answer is N/A, not "No" (which would claim the option exists but is off).
-        ENTRY_ACCESSIBILITY to "N/A",
-        ENTRY_DRAW_OVER to "N/A",
+        ENTRY_ACCESSIBILITY to yesNo(accessibilityOn),
+        ENTRY_DRAW_OVER to yesNo(drawOver),
         ENTRY_BITWARDEN_VERSION to bitwardenPkg?.let { packageVersion(it) },
         ENTRY_APP_OR_URL to appOrUrl,
         ENTRY_EXTRA to extra,
